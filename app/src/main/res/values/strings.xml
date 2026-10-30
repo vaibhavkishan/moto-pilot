@@ -1,0 +1,164 @@
+<resources>
+    <string name="app_name">MotoPilot</string>
+
+    <!-- Bottom navigation -->
+    <string name="tab_connect">Connect</string>
+    <string name="tab_navigate">Navigate</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Device connection -->
+    <string name="connect_title">Device connection</string>
+    <string name="connect_subtitle">Connect your phone to the MotoPilot display over Bluetooth.</string>
+    <string name="status_not_connected">Not connected</string>
+    <string name="status_searching">Searching for devices…</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_reconnecting">Reconnecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_failed">Connection failed</string>
+    <string name="status_not_connected_hint">Scan to find your display, or reconnect to the last one you used.</string>
+    <string name="status_searching_hint">Looking for MotoPilot displays nearby.</string>
+    <string name="status_connecting_hint">Keep the display powered on and close to your phone.</string>
+    <string name="status_connected_hint">Your display is ready to receive directions.</string>
+    <string name="status_failed_hint">Check that the display is on and nearby, then try again.</string>
+    <string name="last_used">Last used: %1$s</string>
+    <string name="action_scan">Scan for devices</string>
+    <string name="action_stop_scan">Stop scan</string>
+    <string name="action_rescan">Scan again</string>
+    <string name="action_connect_to">Connect to %1$s</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_forget">Forget</string>
+    <string name="action_try_again">Try again</string>
+    <string name="action_go_navigate">Go to navigation</string>
+    <string name="devices_title">Bluetooth devices</string>
+    <string name="devices_empty_title">No devices found</string>
+    <string name="devices_empty_hint">Make sure your MotoPilot display is powered on and Bluetooth is enabled.</string>
+    <string name="devices_before_scan">Tap scan to look for your display.</string>
+    <string name="devices_scanning">Searching…</string>
+    <string name="device_saved">Saved</string>
+    <string name="device_signal_strong">Strong signal</string>
+    <string name="device_signal_fair">Fair signal</string>
+    <string name="device_signal_weak">Weak signal</string>
+    <string name="device_signal_format">%1$d dBm</string>
+    <string name="device_row_action">Connect to %1$s</string>
+    <string name="tip_pairing">Tip: power on the display and keep it within a few meters of your phone.</string>
+    <string name="msg_connected">Connected to %1$s</string>
+    <string name="msg_connect_failed">Couldn\'t connect to the display. Try again.</string>
+    <string name="msg_arrived">You have arrived. Navigation finished.</string>
+    <string name="msg_forgotten">Device forgotten</string>
+
+    <!-- Navigation -->
+    <string name="nav_title">Navigation</string>
+    <string name="nav_subtitle">Find a destination and send directions to your display.</string>
+    <string name="chip_display_connected">Display connected</string>
+    <string name="chip_display_disconnected">Display not connected</string>
+    <string name="chip_display_reconnecting">Reconnecting…</string>
+    <string name="banner_disconnected_title">Your display isn\'t connected</string>
+    <string name="banner_disconnected_body">Connect it to send directions.</string>
+    <string name="banner_connect">Connect display</string>
+    <string name="dest_label">Destination</string>
+    <string name="dest_placeholder">Search address or place</string>
+    <string name="dest_search_cd">Search</string>
+    <string name="dest_clear_cd">Clear destination</string>
+    <string name="search_results">Results</string>
+    <string name="search_number_unconfirmed">House number not confirmed. Check the street before selecting.</string>
+    <string name="dest_selected_summary">Destination: %1$s</string>
+    <string name="dest_coords_summary">Using coordinates %1$s, %2$s</string>
+    <string name="route_type">Route type</string>
+    <string name="route_profile_car">Car</string>
+    <string name="route_profile_motorcycle">Motorcycle</string>
+    <string name="route_profile_bike">Bike</string>
+    <string name="route_profile_walking">Walking</string>
+    <string name="advanced_title">Advanced options</string>
+    <string name="advanced_summary_default">City and coordinates</string>
+    <string name="advanced_expand">Show advanced options</string>
+    <string name="advanced_collapse">Hide advanced options</string>
+    <string name="city_label">City and state (optional)</string>
+    <string name="city_hint">Example: Bengaluru, KA. Helps tell apart streets with the same name.</string>
+    <string name="coords_title">Destination coordinates</string>
+    <string name="lat_label">Latitude</string>
+    <string name="lat_placeholder">12.9716</string>
+    <string name="lon_label">Longitude</string>
+    <string name="lon_placeholder">77.5946</string>
+    <string name="coords_hint">Used for navigation. Choosing a search result fills these in.</string>
+    <string name="coords_error_number">Enter a number</string>
+    <string name="coords_error_lat_range">Latitude must be between -90 and 90</string>
+    <string name="coords_error_lon_range">Longitude must be between -180 and 180</string>
+    <string name="coords_error_missing">Enter both latitude and longitude</string>
+    <string name="start_navigation">Start navigation</string>
+    <string name="starting_navigation">Starting…</string>
+    <string name="stop_navigation">Stop navigation</string>
+    <string name="start_hint_not_connected">Connect your display to start.</string>
+    <string name="start_hint_no_destination">Search for a destination to start.</string>
+    <string name="start_hint_search_not_run">Tap search and choose a result to start.</string>
+    <string name="start_hint_invalid_coordinates">Fix the coordinates to start.</string>
+    <string name="start_hint_starting">Waiting for a GPS fix…</string>
+    <string name="active_title">Navigating</string>
+    <string name="active_to">To %1$s</string>
+    <string name="active_display_lost">Display disconnected. Reconnecting…</string>
+    <string name="gps_weak">GPS weak or outdated. Holding the last reliable position.</string>
+    <string name="gps_accuracy">GPS accuracy: ±%1$d m</string>
+    <string name="remaining_time">Time left</string>
+    <string name="remaining_distance">Distance left</string>
+    <string name="trip_arrival">Arrive at %1$s</string>
+    <string name="trip_estimate">Estimated time, without live traffic.</string>
+    <string name="trip_calculating">Waiting for GPS and route calculation…</string>
+    <string name="trip_off_route">Off the route. MotoPilot finds a new route automatically.</string>
+
+    <!-- Offline map -->
+    <string name="offline_downloading">Preparing offline map…</string>
+    <string name="offline_ready">Route ready for offline use</string>
+    <string name="offline_incomplete">Download incomplete</string>
+    <string name="offline_outside">Outside the downloaded area</string>
+    <string name="offline_progress">%1$d of %2$d areas saved · at least %3$d m on each side</string>
+    <string name="offline_ready_hint">The streets along this route are saved on your phone. GPS and Bluetooth keep working without internet.</string>
+    <string name="offline_wait_hint">Keep internet connected until the route is ready. Long routes may take a few minutes. You can stop and resume without losing saved areas.</string>
+    <string name="offline_outside_hint">The route is saved, but your position is outside its downloaded area. A new route needs internet.</string>
+    <string name="offline_retry">Resume download</string>
+    <string name="offline_too_long">Route too long for one download. Split it into shorter trips.</string>
+    <string name="offline_unsupported">This region is outside the supported download area.</string>
+    <string name="offline_too_dense">Too much map data. Try a smaller map range in Settings.</string>
+    <string name="offline_server_busy">The map server is busy. Try again in a moment.</string>
+    <string name="offline_download_error">Download interrupted. Check your internet connection and free storage, then resume. Saved areas will be reused.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_navigation_section">Navigation</string>
+    <string name="setting_nav_hz_title">Update rate</string>
+    <string name="setting_nav_hz_value">%1$d Hz</string>
+    <string name="setting_nav_hz_desc">How often directions are sent to the display. Applies the next time you start navigation.</string>
+    <string name="settings_map_section">Map and offline use</string>
+    <string name="setting_map_scale_title">Vertical range</string>
+    <string name="setting_map_scale_value">%1$d m</string>
+    <string name="setting_map_scale_desc">Vertical range from the center. Streets stay undistorted. Offline download covers the visible map plus a margin; the range applies when navigation starts.</string>
+    <string name="stats_title">Statistics</string>
+    <string name="stats_hint">Live values while navigating.</string>
+    <string name="stat_updates">Updates</string>
+    <string name="stat_bitrate">Transfer rate</string>
+    <string name="stat_resolution">Map area</string>
+    <string name="stat_total_updates">Total updates</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_credits">By Vaibhav Kishan. Built on DisplayConnect by Antonio Malaquias (MIT license).</string>
+    <string name="about_data">Map data © OpenStreetMap contributors. Search by Nominatim and Photon, routing by OSRM (FOSSGIS), streets from Overpass. Check the city and address before selecting.</string>
+    <string name="fix_map">View or correct OpenStreetMap data</string>
+
+    <!-- Errors -->
+    <string name="error_search_too_short">Enter at least 3 characters to search</string>
+    <string name="error_search_failed">Search unavailable. Check your internet connection and try again.</string>
+    <string name="error_place_not_found">Address not found. Enter the city, try just the street name, or use destination coordinates.</string>
+    <string name="error_no_ble_device">Scan and select your display first</string>
+    <string name="error_bluetooth_disabled">Turn on Bluetooth and try again</string>
+    <string name="error_bluetooth_permission">Bluetooth permission is needed to find your display</string>
+    <string name="error_invalid_destination">Choose a valid destination first</string>
+    <string name="error_not_connected">Connect your display first</string>
+    <string name="error_precise_location">Enable precise location in app permissions to navigate.</string>
+
+    <!-- Maps browser (not reachable from the main UI) -->
+    <string name="maps_browser_title">Google Maps</string>
+    <string name="maps_browser_hint">Keep this screen open. Navigation text is sent as HTML to the CYD every 2 seconds.</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Navigation</string>
+    <string name="notification_title">MotoPilot is navigating</string>
+    <string name="notification_nav_text">Sending directions to your display</string>
+</resources>
