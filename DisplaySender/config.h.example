@@ -1,0 +1,30 @@
+#pragma once
+
+// =============================================================================
+// Copy this file to config.h:
+//   cp config.h.example config.h
+// =============================================================================
+
+// BLE device name shown in Android scan results
+#define BLE_DEVICE_NAME "MotoPilot-CYD"
+
+// Nordic UART Service (NUS) UUIDs — must match the Android BleNavClient
+#define NUS_SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define NUS_RX_UUID      "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define NUS_TX_UUID      "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define BLE_MTU 256
+
+// TFT display — configured in Arduino/libraries/TFT_eSPI/User_Setup.h
+// Touch (XPT2046 on CYD): CS=33, IRQ=36, MOSI=32, MISO=39, CLK=25
+//   (see touch_cyd.cpp — used for the on-screen light/dark theme button)
+//
+// Arduino libraries required:
+//   - TFT_eSPI
+//   - NimBLE-Arduino (h2zero) v2.x+
+//   - ArduinoJson (v7+)
+//   - XPT2046_Touchscreen
+//
+// Theme preference is stored with ESP32 Preferences (NVS namespace "ui").
+//
+// Note: Never draw on the TFT from BLE callbacks (causes CYD reboot).
