@@ -1,0 +1,43 @@
+# Gradle / Android build output
+.gradle/
+build/
+**/build/
+.kotlin/
+local.properties
+*.apk
+*.aab
+*.hprof
+.externalNativeBuild/
+.cxx/
+
+# IDE and editor settings
+.idea/
+*.iml
+.vscode/
+captures/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Firmware: copy config.h.example to config.h locally
+DisplaySender/config.h
+DisplaySender/build/
+*.elf
+*.bin
+*.map
+
+# Signing keys and secrets
+*.jks
+*.keystore
+google-services.json
+secrets.properties
+.env
+.env.*
