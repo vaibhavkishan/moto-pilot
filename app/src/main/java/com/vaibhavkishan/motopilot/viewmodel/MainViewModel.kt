@@ -140,6 +140,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         searchJob?.cancel()
         val query = _uiState.value.destQuery.trim()
         val city = _uiState.value.searchCity.trim()
+        Coordinates.fromSearchText(query)?.let { (latitude, longitude) ->
+            useTypedCoordinates(latitude, longitude)
+            return
+        }
         if (query.length < 3) {
             _uiState.update {
                 it.copy(errorMessage = getApplication<Application>().getString(R.string.error_search_too_short))
@@ -170,6 +174,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
+        }
+    }
+
+    private fun useTypedCoordinates(latitude: Double, longitude: Double) {
+        val lat = latitude.toString()
+        val lon = longitude.toString()
+        val label = getApplication<Application>().getString(R.string.destination_from_coordinates, lat, lon)
+        _uiState.update {
+            it.copy(destLabel = label, destLat = lat, destLon = lon, searchResults = emptyList(),
+                isSearching = false, errorMessage = null)
+        }
+        viewModelScope.launch {
+            settingsRepository.updateSettings {
+                it.copy(destQuery = _uiState.value.destQuery, destLabel = label, destLat = lat, destLon = lon)
+            }
         }
     }
 

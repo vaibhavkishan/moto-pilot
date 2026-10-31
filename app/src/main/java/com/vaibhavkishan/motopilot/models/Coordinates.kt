@@ -24,6 +24,28 @@ object Coordinates {
         if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
         return latitude to longitude
     }
+
+    private val PAIR = Regex(
+        """^\(?\s*([+-]?\d+(?:[.,]\d+)?)\s*°?\s*([NSns])?\s*[,;\s]\s*([+-]?\d+(?:[.,]\d+)?)\s*°?\s*([EWew])?\s*\)?$"""
+    )
+
+    /**
+     * Reads a search text such as "-23.5505, -46.6333", "12.97 77.59" or "23.55 S, 46.63 W" as a
+     * coordinate pair. Returns null when the text is anything else, so it is searched as a place.
+     */
+    fun fromSearchText(text: String): Pair<Double, Double>? {
+        val match = PAIR.matchEntire(text.trim()) ?: return null
+        val (first, ns, second, ew) = match.destructured
+        // Two bare whole numbers such as "10 20" are more likely a street address than a position.
+        val bareIntegers = ns.isEmpty() && ew.isEmpty() && !text.contains(',') && !text.contains(';') &&
+            !first.contains('.') && !second.contains('.')
+        if (bareIntegers) return null
+        var latitude = parse(first) ?: return null
+        var longitude = parse(second) ?: return null
+        if (ns.equals("S", ignoreCase = true)) latitude = -latitude
+        if (ew.equals("W", ignoreCase = true)) longitude = -longitude
+        return resolve(latitude.toString(), longitude.toString())
+    }
 }
 
 enum class StartBlocker { NONE, STARTING, NOT_CONNECTED, NO_DESTINATION, SEARCH_NOT_RUN, INVALID_COORDINATES }

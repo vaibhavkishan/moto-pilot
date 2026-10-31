@@ -159,6 +159,7 @@
 
     <!-- Errors -->
     <string name="error_search_too_short">Enter at least 3 characters to search</string>
+    <string name="destination_from_coordinates">Coordinates %1$s, %2$s</string>
     <string name="error_search_failed">Search unavailable. Check your internet connection and try again.</string>
     <string name="error_place_not_found">Address not found. Enter the city, try just the street name, or use destination coordinates.</string>
     <string name="error_no_ble_device">Scan and select your display first</string>
