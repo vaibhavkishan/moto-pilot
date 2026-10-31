@@ -36,9 +36,14 @@ private:
   TFT_eSprite mapSpr_;
   TFT_eSprite lineSpr_;
   TFT_eSprite iconSpr_;
+  TFT_eSprite distSpr_;
   bool mapSprOk_ = false;
   bool lineSprOk_ = false;
   bool iconSprOk_ = false;
+  bool distSprOk_ = false;
+  bool lastMinimal_ = false;
+  char minimalText_[24] = {};
+  int minimalProgressPx_ = -2;
 
   bool paletteValid_ = false;
   bool paletteDark_ = false;
@@ -57,8 +62,9 @@ private:
   void drawMapLayer(const NavState& state, const MapView& view);
   void drawOverlay(const NavState& state);
   void drawOverlayBase();
+  void drawOverlayMinimal(const NavState& state);
   void drawTextLine(int index, int x, int y, int width, int height, const char* text, uint16_t color,
                     LineKind kind);
-  void drawManeuverIcon(uint8_t maneuver);
+  void drawManeuverIcon(uint8_t maneuver, uint16_t foreground, uint16_t background);
   void drawThemeSwitchAt(int sx, int sy);
 };

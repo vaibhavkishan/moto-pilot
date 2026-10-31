@@ -325,6 +325,30 @@ void drawArrivalScreen(TFT_eSPI& tft, bool dark) {
   tft.setTextDatum(TL_DATUM);
 }
 
+void drawArrivalScreenMinimal(TFT_eSPI& tft, bool dark) {
+  const uint16_t bg = dark ? 0x0000 : 0xFFFF;
+  const uint16_t fg = dark ? 0xFFFF : 0x0000;
+  const uint16_t dim = c565(dark ? Rgb{140, 140, 140} : Rgb{110, 110, 110});
+  tft.fillScreen(bg);
+
+  /* The destination mark of the Minimal map, enlarged. */
+  const int cx = SCR_W / 2, cy = 104;
+  tft.fillCircle(cx, cy, 42, fg);
+  tft.fillCircle(cx, cy, 24, bg);
+  tft.fillCircle(cx, cy, 10, fg);
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(fg, bg);
+  tft.drawString("You have arrived", SCR_W / 2, 190, 4);
+  tft.drawString("You have arrived", SCR_W / 2 + 1, 190, 4);
+  tft.setTextColor(dim, bg);
+  tft.drawString("Navigation finished", SCR_W / 2, 224, 2);
+
+  /* A full trip progress bar. */
+  tft.fillRoundRect(40, 268, SCR_W - 80, 4, 2, fg);
+  tft.setTextDatum(TL_DATUM);
+}
+
 void drawStatusScreen(TFT_eSPI& tft, const char* title, const char* line2, const char* line3) {
   tft.fillScreen(mapsColLand());
   if (!mapsThemeIsDark()) {

@@ -23,12 +23,17 @@ struct Scenario {
   bool rerouting;
   bool gpsWeak;
   bool destVisible;
+  uint8_t style = STYLE_CLASSIC;
+  float progress = -1.0f;
+  float zoom = 1.0f;
 };
 
 // Canvas is 408x408 with the user at (204, 204); the CYD rotates it heading-up.
 NavState buildNav(const Scenario& s) {
   NavState n;
   n.valid = true;
+  n.style = s.style;
+  n.tripProgress = s.progress;
   n.headingUpMode = true;
   n.bearingValid = true;
   n.distanceM = s.distanceM;
@@ -81,9 +86,15 @@ int main(int argc, char** argv) {
   const char* dir = argc > 1 ? argv[1] : ".";
   const Scenario scenarios[] = {
       {"nav_turn", MAN_RIGHT, 350, "Turn right", "Rua Augusta", 4200, 840, "18:42", false, false, false, true},
+      {"nav_turn_zoom", MAN_RIGHT, 45, "Turn right", "Rua Augusta", 4200, 840, "18:42", false, false, false, true,
+       STYLE_CLASSIC, -1.0f, 2.8f},
       {"nav_rerouting", MAN_NONE, 0, "Return to the route", "", -1, -1, "", true, true, false, false},
       {"nav_weak_gps", MAN_STRAIGHT, 120, "Continue straight", "Avenida Paulista", 2600, 540, "18:35", false, false, true, true},
       {"nav_arriving", MAN_ARRIVE, 40, "Destination ahead", "Rua Oscar Freire", 40, 30, "18:27", false, false, false, true},
+      {"minimal_turn", MAN_RIGHT, 300, "Turn right", "Rua Augusta", 4200, 840, "18:42", false, false, false, true, STYLE_MINIMAL, 0.32f},
+      {"minimal_km", MAN_STRAIGHT, 1840, "Continue straight", "", 9000, 1200, "18:50", false, false, false, false, STYLE_MINIMAL, 0.6f},
+      {"minimal_rerouting", MAN_NONE, 0, "Return to the route", "", -1, -1, "", true, true, false, false, STYLE_MINIMAL, 0.4f},
+      {"minimal_arriving", MAN_ARRIVE, 40, "Destination ahead", "", 40, 30, "18:27", false, false, false, true, STYLE_MINIMAL, 0.97f},
   };
 
   for (int dark = 0; dark < 2; dark++) {
@@ -111,6 +122,7 @@ int main(int argc, char** argv) {
       MapView view;
       view.headingKnown = true;
       view.headingDeg = 0.0f;
+      view.zoom = s.zoom;
       renderer.draw(buildNav(s), view);
       save(tft, dir, s.name, dark);
     }
@@ -118,6 +130,11 @@ int main(int argc, char** argv) {
       TFT_eSPI tft;
       drawArrivalScreen(tft, dark);
       save(tft, dir, "arrival", dark);
+    }
+    {
+      TFT_eSPI tft;
+      drawArrivalScreenMinimal(tft, dark);
+      save(tft, dir, "minimal_arrival", dark);
     }
   }
   return 0;

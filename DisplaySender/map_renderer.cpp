@@ -15,6 +15,12 @@ static const uint8_t STREET_EDGE_W = 4;
 static const uint8_t STREET_FILL_W = 2;
 static const uint8_t ROUTE_EDGE_W = 6;
 static const uint8_t ROUTE_FILL_W = 3;
+/* Minimal style: one thick route line with a clear halo; side roads only as short fading stubs. */
+static const uint8_t MINIMAL_STREET_W = 2;
+static const float MINIMAL_STUB_LEN = 30.0f;
+static const float MINIMAL_STUB_TOUCH = 8.0f;
+static const uint8_t MINIMAL_ROUTE_EDGE_W = 14;
+static const uint8_t MINIMAL_ROUTE_FILL_W = 9;
 
 #define SW_W 48
 #define SW_H 24
@@ -31,6 +37,8 @@ static const uint8_t ROUTE_FILL_W = 3;
 #define INSTR_Y (MAP_AREA_H + 31)
 #define STREET_Y (MAP_AREA_H + 51)
 #define INFO_Y (MAP_AREA_H + 71)
+#define BL_DIST_W 140
+#define BL_DIST_H 52
 
 /* Colours the map layer uses. The 4-bit sprite stores these indices; the palette maps them to RGB565. */
 enum PaletteIndex : uint8_t {
@@ -48,6 +56,8 @@ enum PaletteIndex : uint8_t {
   PAL_DONE,
   PAL_DEST,
   PAL_DEST_EDGE,
+  PAL_FADE1,
+  PAL_FADE2,
   PAL_COUNT
 };
 
@@ -108,7 +118,7 @@ static void drawThickLine(TFT_eSPI& g, int16_t x0, int16_t y0, int16_t x1, int16
   }
 }
 
-/* Chevron about 12 px tall at scale 0.5, centred on (cx, cy); a larger scale gives the white edge. */
+/* Chevron about 24 px tall at scale 1, centred on (cx, cy); a larger scale gives the white edge. */
 static void fillArrow(TFT_eSPI& g, int cx, int cy, float deg, float scale, uint16_t color) {
   static const float P[4][2] = {{0.0f, -12.0f}, {-10.0f, 12.0f}, {0.0f, 6.0f}, {10.0f, 12.0f}};
   const float rad = deg * DEG_TO_RAD;
@@ -141,10 +151,10 @@ static void drawMarker(TFT_eSPI& g, const uint16_t* pal, int cx, int cy, const N
   const float deg = state.headingUpMode ? 0.0f : view.headingDeg;
   if (!dark) {
     /* Dark outer edge, white ring, blue fill: readable on white roads and on the blue route. */
-    fillArrow(g, cx, cy, deg, 0.78f, pal[PAL_ARROW_EDGE]);
+    fillArrow(g, cx, cy, deg, 1.12f, pal[PAL_ARROW_EDGE]);
   }
-  fillArrow(g, cx, cy, deg, 0.66f, pal[PAL_OUTLINE]);
-  fillArrow(g, cx, cy, deg, 0.5f, pal[PAL_ARROW]);
+  fillArrow(g, cx, cy, deg, 0.96f, pal[PAL_OUTLINE]);
+  fillArrow(g, cx, cy, deg, 0.74f, pal[PAL_ARROW]);
 }
 
 /* Red map pin whose tip sits on (x, y). */
@@ -154,7 +164,8 @@ static void drawDestination(TFT_eSPI& g, const uint16_t* pal, int x, int y) {
 
 /* Transforms a source polyline to the screen and draws its casing, then its fill. */
 static void drawPolyline(TFT_eSPI& g, const MapXf& xf, const int16_t* srcX, const int16_t* srcY, int count,
-                         uint16_t edgeColor, uint16_t fillColor) {
+                         uint16_t edgeColor, uint16_t fillColor, uint8_t edgeW = ROUTE_EDGE_W,
+                         uint8_t fillW = ROUTE_FILL_W) {
   if (count < 2) {
     return;
   }
@@ -170,7 +181,7 @@ static void drawPolyline(TFT_eSPI& g, const MapXf& xf, const int16_t* srcX, cons
   }
   for (int pass = 0; pass < 2; pass++) {
     const uint16_t color = pass == 0 ? edgeColor : fillColor;
-    const uint8_t width = (pass == 0) ? ROUTE_EDGE_W : ROUTE_FILL_W;
+    const uint8_t width = (pass == 0) ? edgeW : fillW;
     for (int i = 0; i < count - 1; i++) {
       if (!ok[i] || !ok[i + 1] || segmentOffscreen(px[i], py[i], px[i + 1], py[i + 1])) {
         continue;
@@ -238,10 +249,158 @@ static void drawManeuverShape(TFT_eSPI& g, int ox, int oy, uint8_t maneuver, uin
   }
 }
 
+/* Minimal style: a bold arrow with a halo in the background colour, or a plain dot before the first heading. */
+static void drawMinimalMarker(TFT_eSPI& g, const uint16_t* pal, int cx, int cy, const NavState& state,
+                              const MapView& view) {
+  if (!view.headingKnown) {
+    g.fillCircle(cx, cy, 13, pal[PAL_OUTLINE]);
+    g.fillCircle(cx, cy, 10, pal[PAL_ARROW]);
+    return;
+  }
+  const float deg = state.headingUpMode ? 0.0f : view.headingDeg;
+  fillArrow(g, cx, cy, deg, 1.75f, pal[PAL_OUTLINE]);
+  fillArrow(g, cx, cy, deg, 1.4f, pal[PAL_ARROW]);
+}
+
+/* Minimal style destination: a ring with a dot, in the route colour. */
+static void drawMinimalDestination(TFT_eSPI& g, const uint16_t* pal, int x, int y) {
+  g.fillCircle(x, y, 11, pal[PAL_DEST_EDGE]);
+  g.fillCircle(x, y, 9, pal[PAL_DEST]);
+  g.fillCircle(x, y, 5, pal[PAL_DEST_EDGE]);
+  g.fillCircle(x, y, 2, pal[PAL_DEST]);
+}
+
+static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+/* Black screen with white drawing in the dark theme, the reverse in the light theme. */
+static void fillMinimalPalette(uint16_t* p) {
+  const bool dark = mapsThemeIsDark();
+  const uint16_t bg = dark ? 0x0000 : 0xFFFF;
+  const uint16_t fg = dark ? 0xFFFF : 0x0000;
+  memset(p, 0, 16 * sizeof(uint16_t));
+  p[PAL_LAND] = bg;
+  p[PAL_PARK] = bg;
+  p[PAL_ROAD_EDGE] = bg;
+  p[PAL_ROAD_FILL] = dark ? rgb565(130, 130, 130) : rgb565(150, 150, 150);
+  p[PAL_ROUTE_EDGE] = bg;
+  p[PAL_ROUTE] = fg;
+  p[PAL_SHADOW] = bg;
+  p[PAL_OUTLINE] = bg;
+  p[PAL_ARROW] = fg;
+  p[PAL_ARROW_EDGE] = bg;
+  p[PAL_DEST] = fg;
+  p[PAL_DEST_EDGE] = bg;
+  p[PAL_FADE1] = dark ? rgb565(80, 80, 80) : rgb565(195, 195, 195);
+  p[PAL_FADE2] = dark ? rgb565(42, 42, 42) : rgb565(228, 228, 228);
+}
+
+/* Squared distance from (px, py) to the segment (x0, y0)-(x1, y1). */
+static float distSqToSegment(float px, float py, float x0, float y0, float x1, float y1) {
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len2 = dx * dx + dy * dy;
+  float t = len2 > 0.0f ? ((px - x0) * dx + (py - y0) * dy) / len2 : 0.0f;
+  t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  const float ex = x0 + dx * t - px;
+  const float ey = y0 + dy * t - py;
+  return ex * ex + ey * ey;
+}
+
+/* Where segment a-b crosses segment c-d, if it does. */
+static bool segmentCross(float ax, float ay, float bx, float by, float cx, float cy, float dx, float dy,
+                         float& ox, float& oy) {
+  const float rx = bx - ax, ry = by - ay, sx = dx - cx, sy = dy - cy;
+  const float den = rx * sy - ry * sx;
+  if (fabsf(den) < 1e-6f) {
+    return false;
+  }
+  const float t = ((cx - ax) * sy - (cy - ay) * sx) / den;
+  const float u = ((cx - ax) * ry - (cy - ay) * rx) / den;
+  if (t < 0.0f || t > 1.0f || u < 0.0f || u > 1.0f) {
+    return false;
+  }
+  ox = ax + rx * t;
+  oy = ay + ry * t;
+  return true;
+}
+
+/* A short side road leaving the route, fading out in three steps. */
+static void drawSideRoadStub(TFT_eSPI& g, const uint16_t* pal, float x0, float y0, float x1, float y1) {
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float len = sqrtf(dx * dx + dy * dy);
+  if (len < 2.0f) {
+    return;
+  }
+  const float use = len < MINIMAL_STUB_LEN ? len : MINIMAL_STUB_LEN;
+  const float ux = dx / len;
+  const float uy = dy / len;
+  static const uint8_t SHADE[3] = {PAL_ROAD_FILL, PAL_FADE1, PAL_FADE2};
+  for (int i = 0; i < 3; i++) {
+    const float s0 = use * i / 3.0f;
+    const float s1 = use * (i + 1) / 3.0f;
+    drawThickLine(g, lroundf(x0 + ux * s0), lroundf(y0 + uy * s0), lroundf(x0 + ux * s1), lroundf(y0 + uy * s1),
+                  pal[SHADE[i]], MINIMAL_STREET_W);
+  }
+}
+
+/* Minimal style: of all roads only a short, fading stub where a side road meets the route. */
+static void drawSideRoadStubs(TFT_eSPI& g, const uint16_t* pal, const NavState& state, const MapXf& xf,
+                              const int16_t* sx0, const int16_t* sy0, const int16_t* sx1, const int16_t* sy1,
+                              int segCount) {
+  static int16_t rx[NAV_MAX_ROUTE_POINTS];
+  static int16_t ry[NAV_MAX_ROUTE_POINTS];
+  int rn = 0;
+  for (int i = 0; i < state.routeCount; i++) {
+    if (state.routeX[i] < 0 || state.routeY[i] < 0) {
+      rn = 0;  /* a gap: only the part after it is the route in view */
+      continue;
+    }
+    xfApply(xf, state.routeX[i], state.routeY[i], rx[rn], ry[rn]);
+    rn++;
+  }
+  if (rn < 2) {
+    return;
+  }
+  const float touch2 = MINIMAL_STUB_TOUCH * MINIMAL_STUB_TOUCH;
+  for (int i = 0; i < segCount; i++) {
+    const float ax = sx0[i], ay = sy0[i], bx = sx1[i], by = sy1[i];
+    float da = 1e9f, db = 1e9f;
+    for (int r = 0; r < rn - 1 && (da > touch2 || db > touch2); r++) {
+      const float d1 = distSqToSegment(ax, ay, rx[r], ry[r], rx[r + 1], ry[r + 1]);
+      const float d2 = distSqToSegment(bx, by, rx[r], ry[r], rx[r + 1], ry[r + 1]);
+      da = d1 < da ? d1 : da;
+      db = d2 < db ? d2 : db;
+    }
+    const bool touchA = da <= touch2;
+    const bool touchB = db <= touch2;
+    if (touchA && touchB) {
+      continue;  /* runs along the route */
+    }
+    if (touchA) {
+      drawSideRoadStub(g, pal, ax, ay, bx, by);
+    } else if (touchB) {
+      drawSideRoadStub(g, pal, bx, by, ax, ay);
+    } else {
+      for (int r = 0; r < rn - 1; r++) {
+        float ox, oy;
+        if (segmentCross(ax, ay, bx, by, rx[r], ry[r], rx[r + 1], ry[r + 1], ox, oy)) {
+          drawSideRoadStub(g, pal, ox, oy, ax, ay);
+          drawSideRoadStub(g, pal, ox, oy, bx, by);
+          break;
+        }
+      }
+    }
+  }
+}
+
 static void renderMap(TFT_eSPI& g, const uint16_t* pal, const NavState& state, const MapXf& xf,
                       const MapView& view) {
+  const bool minimal = state.style == STYLE_MINIMAL;
   g.fillRect(0, 0, SCR_W, MAP_AREA_H, pal[PAL_LAND]);
-  if (!mapsThemeIsDark()) {
+  if (!minimal && !mapsThemeIsDark()) {
     g.fillCircle(SCR_W - 36, 70, 32, pal[PAL_PARK]);
     g.fillCircle(28, MAP_AREA_H - 60, 26, pal[PAL_PARK]);
   }
@@ -264,33 +423,52 @@ static void renderMap(TFT_eSPI& g, const uint16_t* pal, const NavState& state, c
     segY1[segCount] = y1;
     segCount++;
   }
-  for (int i = 0; i < segCount; i++) {
-    drawThickLine(g, segX0[i], segY0[i], segX1[i], segY1[i], pal[PAL_ROAD_EDGE], STREET_EDGE_W);
-  }
-  for (int i = 0; i < segCount; i++) {
-    drawThickLine(g, segX0[i], segY0[i], segX1[i], segY1[i], pal[PAL_ROAD_FILL], STREET_FILL_W);
+  if (!minimal) {
+    for (int i = 0; i < segCount; i++) {
+      drawThickLine(g, segX0[i], segY0[i], segX1[i], segY1[i], pal[PAL_ROAD_EDGE], STREET_EDGE_W);
+    }
+    for (int i = 0; i < segCount; i++) {
+      drawThickLine(g, segX0[i], segY0[i], segX1[i], segY1[i], pal[PAL_ROAD_FILL], STREET_FILL_W);
+    }
+  } else {
+    drawSideRoadStubs(g, pal, state, xf, segX0, segY0, segX1, segY1, segCount);
   }
 
-  drawPolyline(g, xf, state.routeDoneX, state.routeDoneY, state.routeDoneCount, pal[PAL_DONE_EDGE], pal[PAL_DONE]);
-  drawPolyline(g, xf, state.routeX, state.routeY, state.routeCount, pal[PAL_ROUTE_EDGE], pal[PAL_ROUTE]);
+  if (minimal) {
+    drawPolyline(g, xf, state.routeX, state.routeY, state.routeCount, pal[PAL_ROUTE_EDGE], pal[PAL_ROUTE],
+                 MINIMAL_ROUTE_EDGE_W, MINIMAL_ROUTE_FILL_W);
+  } else {
+    drawPolyline(g, xf, state.routeDoneX, state.routeDoneY, state.routeDoneCount, pal[PAL_DONE_EDGE], pal[PAL_DONE]);
+    drawPolyline(g, xf, state.routeX, state.routeY, state.routeCount, pal[PAL_ROUTE_EDGE], pal[PAL_ROUTE]);
+  }
 
   if (state.hasDest && state.destX >= 0 && state.destY >= 0) {
     int16_t dx, dy;
     xfApply(xf, state.destX, state.destY, dx, dy);
-    if (dx > -10 && dx < SCR_W + 10 && dy > 0 && dy < MAP_AREA_H + 24) {
+    if (minimal) {
+      if (dx > -12 && dx < SCR_W + 12 && dy > -12 && dy < MAP_AREA_H + 12) {
+        drawMinimalDestination(g, pal, dx, dy);
+      }
+    } else if (dx > -10 && dx < SCR_W + 10 && dy > 0 && dy < MAP_AREA_H + 24) {
       drawDestination(g, pal, dx, dy);
     }
   }
 
   if (state.hasUserPosition && xf.ax >= 0 && xf.ay >= 0 && xf.ax < SCR_W && xf.ay < MAP_AREA_H) {
-    drawMarker(g, pal, xf.ax, xf.ay, state, view);
+    if (minimal) {
+      drawMinimalMarker(g, pal, xf.ax, xf.ay, state, view);
+    } else {
+      drawMarker(g, pal, xf.ax, xf.ay, state, view);
+    }
   }
 
-  g.fillRect(0, MAP_AREA_H - 3, SCR_W, 3, pal[PAL_SHADOW]);
+  if (!minimal) {
+    g.fillRect(0, MAP_AREA_H - 3, SCR_W, 3, pal[PAL_SHADOW]);
+  }
 }
 
 MapRenderer::MapRenderer(TFT_eSPI& display)
-    : tft(display), mapSpr_(&display), lineSpr_(&display), iconSpr_(&display) {}
+    : tft(display), mapSpr_(&display), lineSpr_(&display), iconSpr_(&display), distSpr_(&display) {}
 
 bool MapRenderer::begin() {
   /* Largest block first so the big sprite gets contiguous heap. */
@@ -300,6 +478,8 @@ bool MapRenderer::begin() {
   lineSprOk_ = lineSpr_.createSprite(LINE_W, LINE_H) != nullptr;
   iconSpr_.setColorDepth(16);
   iconSprOk_ = iconSpr_.createSprite(ICON_SIZE, ICON_SIZE) != nullptr;
+  distSpr_.setColorDepth(16);
+  distSprOk_ = distSpr_.createSprite(BL_DIST_W, BL_DIST_H) != nullptr;
   Serial.printf("Renderer: map sprite %s, line sprite %s, icon sprite %s, free heap %u, max block %u\n",
                 mapSprOk_ ? "ok" : "FAILED (direct drawing)", lineSprOk_ ? "ok" : "FAILED",
                 iconSprOk_ ? "ok" : "FAILED", static_cast<unsigned>(ESP.getFreeHeap()),
@@ -341,7 +521,17 @@ bool MapRenderer::themeSwitchHit(uint16_t x, uint16_t y) {
 
 void MapRenderer::draw(const NavState& state, const MapView& view) {
   const uint32_t started = micros();
-  drawOverlay(state);
+  const bool minimal = state.style == STYLE_MINIMAL;
+  if (minimal != lastMinimal_) {
+    lastMinimal_ = minimal;
+    overlayValid_ = false;
+    paletteValid_ = false;
+  }
+  if (minimal) {
+    drawOverlayMinimal(state);
+  } else {
+    drawOverlay(state);
+  }
   drawMapLayer(state, view);
   lastDrawUs_ = micros() - started;
 }
@@ -349,7 +539,11 @@ void MapRenderer::draw(const NavState& state, const MapView& view) {
 void MapRenderer::drawMapLayer(const NavState& state, const MapView& view) {
   const MapXf xf = makeXf(state, view);
   uint16_t themePalette[16];
-  fillThemePalette(themePalette);
+  if (state.style == STYLE_MINIMAL) {
+    fillMinimalPalette(themePalette);
+  } else {
+    fillThemePalette(themePalette);
+  }
 
   if (mapSprOk_) {
     const bool dark = mapsThemeIsDark();
@@ -371,9 +565,7 @@ void MapRenderer::drawOverlayBase() {
   drawThemeSwitchAt(SW_X, SW_Y);
 }
 
-void MapRenderer::drawManeuverIcon(uint8_t maneuver) {
-  const uint16_t background = mapsColCard();
-  const uint16_t foreground = mapsColText();
+void MapRenderer::drawManeuverIcon(uint8_t maneuver, uint16_t foreground, uint16_t background) {
   if (iconSprOk_) {
     iconSpr_.fillSprite(background);
     drawManeuverShape(iconSpr_, 0, 0, maneuver, foreground, background);
@@ -488,11 +680,131 @@ void MapRenderer::drawOverlay(const NavState& state) {
   }
 
   if (!iconValid_ || iconShown_ != state.maneuver) {
-    drawManeuverIcon(state.maneuver);
+    drawManeuverIcon(state.maneuver, mapsColText(), mapsColCard());
   }
   const int textW = SCR_W - TEXT_X - 8;
   drawTextLine(0, TEXT_X, DIST_Y, DIST_W, DIST_H, distOrGps, distColor, LINE_FONT4);
   drawTextLine(1, TEXT_X, INSTR_Y, textW, 20, state.instruction, mapsColText(), LINE_UTF8);
   drawTextLine(2, TEXT_X, STREET_Y, textW, 19, state.street, mapsColMuted(), LINE_UTF8);
   drawTextLine(3, 8, INFO_Y, SCR_W - 16, 16, remaining, remainingColor, LINE_FONT2);
+}
+
+/* Minimal style bottom panel: next-turn icon, large distance, trip progress, small theme button. */
+#define BL_DIST_X 66
+#define BL_DIST_Y (MAP_AREA_H + 10)
+#define BL_BAR_X 20
+#define BL_BAR_W 200
+#define BL_BAR_Y (MAP_AREA_H + 72)
+#define BL_BAR_H 6
+#define BL_THEME_X 222
+#define BL_THEME_Y (MAP_AREA_H + 34)
+
+static void drawMinimalThemeButton(TFT_eSPI& g, bool dark, uint16_t fg, uint16_t bg, uint16_t dim) {
+  const int cx = BL_THEME_X;
+  const int cy = BL_THEME_Y;
+  g.fillCircle(cx, cy, 11, dim);
+  g.fillCircle(cx, cy, 10, bg);
+  if (dark) {
+    g.fillCircle(cx - 1, cy, 5, fg);
+    g.fillCircle(cx + 2, cy - 2, 4, bg);
+  } else {
+    g.fillCircle(cx, cy, 3, fg);
+    for (int i = 0; i < 8; i++) {
+      const float a = i * 0.7853982f;
+      g.drawLine(cx + static_cast<int>(lroundf(cosf(a) * 5)), cy + static_cast<int>(lroundf(sinf(a) * 5)),
+                 cx + static_cast<int>(lroundf(cosf(a) * 8)), cy + static_cast<int>(lroundf(sinf(a) * 8)), fg);
+    }
+  }
+}
+
+/* Whole 10 m steps above 100 m, 5 m steps below, and one decimal for kilometres. */
+static void minimalDistance(int meters, char* digits, size_t size, const char** unit) {
+  int rounded = meters >= 100 ? (meters + 5) / 10 * 10 : (meters + 2) / 5 * 5;
+  if (meters >= 1000 || rounded >= 1000) {
+    snprintf(digits, size, "%.1f", meters / 1000.0f);
+    *unit = "km";
+  } else {
+    snprintf(digits, size, "%d", rounded);
+    *unit = "m";
+  }
+}
+
+void MapRenderer::drawOverlayMinimal(const NavState& state) {
+  const bool dark = mapsThemeIsDark();
+  const uint16_t bg = dark ? 0x0000 : 0xFFFF;
+  const uint16_t fg = dark ? 0xFFFF : 0x0000;
+  const uint16_t dim = dark ? rgb565(70, 70, 70) : rgb565(205, 205, 205);
+
+  if (!overlayValid_ || dark != overlayDark_) {
+    tft.fillRect(0, MAP_AREA_H, SCR_W, OVERLAY_H, bg);
+    drawMinimalThemeButton(tft, dark, fg, bg, dim);
+    overlayValid_ = true;
+    overlayDark_ = dark;
+    iconValid_ = false;
+    minimalText_[0] = '\0';
+    minimalProgressPx_ = -2;
+  }
+
+  const bool lost = state.rerouting || state.offRoute;
+  const uint8_t maneuver = (state.gpsWeak || lost) ? MAN_NONE : state.maneuver;
+  if (!iconValid_ || iconShown_ != maneuver) {
+    drawManeuverIcon(maneuver, fg, bg);
+  }
+
+  char digits[12];
+  const char* unit = "";
+  bool big = true;
+  if (state.gpsWeak) {
+    strcpy(digits, "Weak GPS");
+    big = false;
+  } else if (lost) {
+    strcpy(digits, state.rerouting ? "Rerouting" : "Off route");
+    big = false;
+  } else {
+    minimalDistance(state.distanceM, digits, sizeof(digits), &unit);
+  }
+  char key[24];
+  snprintf(key, sizeof(key), "%s|%s|%d", digits, unit, big ? 1 : 0);
+  if (strcmp(key, minimalText_) != 0) {
+    strcpy(minimalText_, key);
+    TFT_eSPI* g = &tft;
+    int left = BL_DIST_X;
+    int top = BL_DIST_Y;
+    if (distSprOk_) {
+      distSpr_.fillSprite(bg);
+      g = &distSpr_;
+      left = 0;
+      top = 0;
+    } else {
+      tft.fillRect(BL_DIST_X, BL_DIST_Y, BL_DIST_W, BL_DIST_H, bg);
+    }
+    g->setTextDatum(TL_DATUM);
+    g->setTextColor(fg, bg);
+    if (big) {
+      g->drawString(digits, left, top + 2, 6);
+      const int width = g->textWidth(digits, 6);
+      g->drawString(unit, left + width + 6, top + 24, 4);
+    } else {
+      g->drawString(digits, left, top + 12, 4);
+    }
+    if (distSprOk_) {
+      distSpr_.pushSprite(BL_DIST_X, BL_DIST_Y);
+    }
+  }
+
+  int progressPx = -1;
+  if (state.tripProgress >= 0.0f) {
+    const float p = state.tripProgress > 1.0f ? 1.0f : state.tripProgress;
+    progressPx = static_cast<int>(lroundf(p * BL_BAR_W));
+  }
+  if (progressPx != minimalProgressPx_) {
+    minimalProgressPx_ = progressPx;
+    tft.fillRect(BL_BAR_X, BL_BAR_Y, BL_BAR_W, BL_BAR_H, bg);
+    if (progressPx >= 0) {
+      tft.fillRoundRect(BL_BAR_X, BL_BAR_Y, BL_BAR_W, BL_BAR_H, 3, dim);
+      if (progressPx >= 2) {
+        tft.fillRoundRect(BL_BAR_X, BL_BAR_Y, progressPx, BL_BAR_H, progressPx < 6 ? progressPx / 2 : 3, fg);
+      }
+    }
+  }
 }

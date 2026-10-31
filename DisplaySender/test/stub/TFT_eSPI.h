@@ -89,6 +89,11 @@ class TFT_eSPI {
   void setTextColor(uint16_t f) { fg = f; }
   void setTextColor(uint16_t f, uint16_t) { fg = f; }
   void drawString(const char* s, int x, int y, int font) { texts.push_back({x, y, font, datum, fg, s}); }
+  // Rough widths of the built-in fonts; the real panel measures the glyphs.
+  int textWidth(const char* s, int font) const {
+    const int perChar = font == 6 ? 30 : (font == 4 ? 14 : (font == 2 ? 8 : 6));
+    return static_cast<int>(strlen(s)) * perChar;
+  }
   void dump(const char* ppm, const char* txt) const {
     FILE* f = fopen(ppm, "wb");
     fprintf(f, "P6\n%d %d\n255\n", W, H);

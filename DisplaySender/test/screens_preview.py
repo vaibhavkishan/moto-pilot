@@ -8,9 +8,10 @@ src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
 SCALE = 2
 # Approximate pixel heights of the TFT_eSPI built-in fonts 1, 2 and 4.
-FONT_PX = {1: 8, 2: 14, 4: 24}
+FONT_PX = {1: 8, 2: 14, 4: 24, 6: 46}
 ANCHOR = {4: "mm", 3: "lm", 0: "la"}
-ORDER = ["boot", "home", "loading", "nav_turn", "nav_rerouting", "nav_weak_gps", "nav_arriving", "arrival"]
+ORDER = ["boot", "home", "loading", "nav_turn", "nav_turn_zoom", "nav_rerouting", "nav_weak_gps", "nav_arriving", "arrival",
+         "minimal_turn", "minimal_km", "minimal_rerouting", "minimal_arriving", "minimal_arrival"]
 
 
 def font(size):
@@ -39,11 +40,14 @@ def render(name, theme):
 
 
 sheet_w = 240 * SCALE
-sheet = Image.new("RGB", ((sheet_w + 12) * len(ORDER), (320 * SCALE + 12) * 2), (255, 255, 255))
-for row, theme in enumerate(("light", "dark")):
-    for col, name in enumerate(ORDER):
+COLS = 6
+ROWS = (len(ORDER) + COLS - 1) // COLS
+sheet = Image.new("RGB", ((sheet_w + 12) * COLS, (320 * SCALE + 12) * ROWS * 2), (255, 255, 255))
+for theme_row, theme in enumerate(("light", "dark")):
+    for index, name in enumerate(ORDER):
         image = render(name, theme)
         image.save(f"{out}/{name}_{theme}.png")
+        col, row = index % COLS, index // COLS + theme_row * ROWS
         sheet.paste(image, (col * (sheet_w + 12), row * (320 * SCALE + 12)))
 sheet.save(f"{out}/all_screens.png")
 print("ok", len(ORDER) * 2)

@@ -22,6 +22,8 @@
 
 #include "nav_types.h"
 #include "nav_heading.h"
+#include "motion_predictor.h"
+#include "zoom_controller.h"
 #include "map_renderer.h"
 #include "nav_protocol.h"
 #include "loading_screen.h"
@@ -45,15 +47,18 @@ static volatile bool sendOkPending = false;
 static uint32_t navUpdatesReceived = 0;
 static uint32_t lastStatsMillis = 0;
 static uint16_t updatesPerSecond = 0;
+static uint16_t motionUpdatesPerSecond = 0;
 
 static NavState lastNav;
 static bool hasNav = false;
 
 // Rendering is decoupled from BLE parsing: frames only update lastNav, loop() draws the latest.
+// While riding, loop() redraws as fast as the panel allows: the map glides between GPS frames.
 static HeadingFilter headingFilter;
+static MotionPredictor motion;
+static ZoomController zoom;
 static bool navDirty = false;
-static uint32_t lastRenderMs = 0;
-static const uint32_t RENDER_INTERVAL_MS = 50;
+static bool benchActive = false;
 static uint16_t rendersPerSecond = 0;
 static uint32_t renderUsSum = 0;
 static uint32_t renderUsMax = 0;
@@ -87,7 +92,21 @@ void appendRxByte(char c);
 void updateStatsCounter();
 void handleUiFlags();
 void pollThemeSwitch();
-void renderTick();
+bool renderTick();
+void applyNavFrame(const NavState& state);
+void applyMotionUpdate(const MotionUpdate& update);
+
+// The arrival screen matches the style of the last map that was shown.
+static void showArrivalScreen() {
+  if (lastNav.style == STYLE_MINIMAL) {
+    drawArrivalScreenMinimal(tft, mapsThemeIsDark());
+  } else {
+    drawArrivalScreen(tft, mapsThemeIsDark());
+  }
+}
+void handleSerialCommands();
+void benchTick();
+static void toggleBench();
 void redrawAfterThemeChange();
 
 static bool rxQueuePush(uint8_t b) {
@@ -189,19 +208,26 @@ void loop() {
   handleUiFlags();
   drainRxQueue();
   pollThemeSwitch();
-  renderTick();
+  handleSerialCommands();
+  benchTick();
+  const bool rendered = renderTick();
 
   if (clientConnected && awaitingFirstNav) {
     updateMapLoadingAnimation(tft, millis());
   }
 
   updateStatsCounter();
-  delay(5);
+  if (rendered) {
+    yield();
+  } else {
+    delay(2);
+  }
 }
 
 void handleUiFlags() {
   if (uiShowLoading) {
     uiShowLoading = false;
+    benchActive = false;  // a real phone connected: stop the demo ride
     showingWaiting = false;
     showingArrived = false;
     showMapLoadingScreen(tft);
@@ -225,12 +251,12 @@ void handleUiFlags() {
 }
 
 void redrawAfterThemeChange() {
-  if (hasNav && clientConnected) {
+  if (hasNav && (clientConnected || benchActive)) {
     mapRenderer.invalidate();
     navDirty = true;
     showingWaiting = false;
-  } else if (clientConnected && showingArrived) {
-    drawArrivalScreen(tft, mapsThemeIsDark());
+  } else if ((clientConnected || benchActive) && showingArrived) {
+    showArrivalScreen();
     showingWaiting = false;
   } else if (clientConnected && awaitingFirstNav) {
     showMapLoadingScreen(tft);
@@ -242,12 +268,29 @@ void redrawAfterThemeChange() {
 }
 
 void pollThemeSwitch() {
+  static uint32_t touchStartMs = 0;
+  static uint16_t touchStartY = 0;
+  static bool holdHandled = false;
   uint16_t x = 0;
   uint16_t y = 0;
   const bool down = touchRead(x, y);
   const uint32_t now = millis();
 
   if (down && !touchWasDown) {
+    touchStartMs = now;
+    touchStartY = y;
+    holdHandled = false;
+    if (benchActive && y < MAP_AREA_H) {
+      toggleBench();  // a tap on the map ends the demo ride
+      holdHandled = true;
+    }
+  }
+  if (down && !holdHandled && !benchActive && showingWaiting && touchStartY < 90 && now - touchStartMs > 1000) {
+    toggleBench();  // holding the logo for a second starts the demo ride
+    holdHandled = true;
+  }
+
+  if (down && !touchWasDown && !holdHandled) {
     const bool hit = MapRenderer::themeSwitchHit(x, y);
     Serial.printf("tap %u,%u hit=%d\n", x, y, hit ? 1 : 0);
     if (hit && (now - lastThemeToggleMs) > 350) {
@@ -361,6 +404,7 @@ void processTextMessage(const char* payload, size_t length) {
     hasNav = false;
     showingWaiting = false;
     showingArrived = false;
+    motion.reset();
     showMapLoadingScreen(tft);
     return;
   }
@@ -370,7 +414,16 @@ void processTextMessage(const char* payload, size_t length) {
     hasNav = false;
     showingWaiting = false;
     showingArrived = true;
-    drawArrivalScreen(tft, mapsThemeIsDark());
+    motion.reset();
+    showArrivalScreen();
+    return;
+  }
+
+  if (isMotionJson(payload, length)) {
+    MotionUpdate update;
+    if (parseMotionJson(payload, length, update)) {
+      applyMotionUpdate(update);
+    }
     return;
   }
 
@@ -378,14 +431,36 @@ void processTextMessage(const char* payload, size_t length) {
   if (!parseNavJson(payload, length, state)) {
     return;
   }
+  applyNavFrame(state);
+}
 
+// A light update between full frames: the newest heading and fix move the map without a new canvas.
+void applyMotionUpdate(const MotionUpdate& update) {
+  if (!hasNav || !lastNav.headingUpMode) {
+    return;
+  }
+  const uint32_t now = millis();
+  headingFilter.onSample(update.bearing, update.bearingValid, now);
+  motion.onFix(update.lat, update.lon, update.speedMps, update.bearing, update.bearingValid && !update.gpsWeak,
+               update.ageMs, now);
+  lastNav.speedMps = update.speedMps;
+  motionUpdatesPerSecond++;
+}
+
+void applyNavFrame(const NavState& state) {
+  const uint32_t now = millis();
   if (!hasNav) {
     // First frame after connect/loading: the screen holds something else and the heading is stale.
     headingFilter.reset();
+    motion.reset();
+    zoom.reset();
     mapRenderer.invalidate();
   }
   // Frames without bearing_valid give no way to tell a real course apart.
-  headingFilter.onSample(state.bearing, state.headingUpMode ? state.bearingValid : true);
+  const bool courseValid = state.headingUpMode ? state.bearingValid : true;
+  headingFilter.onSample(state.bearing, courseValid, now);
+  motion.onFrame(state.lat, state.lon, state.speedMps, state.bearing,
+                 state.headingUpMode && state.bearingValid && !state.gpsWeak, state.pxPerM, state.ageMs, now);
 
   lastNav = state;
   hasNav = true;
@@ -397,24 +472,34 @@ void processTextMessage(const char* payload, size_t length) {
   updatesPerSecond++;
 }
 
-void renderTick() {
-  if (!hasNav || !clientConnected) {
-    return;
+bool renderTick() {
+  if (!hasNav || (!clientConnected && !benchActive)) {
+    return false;
   }
   const uint32_t now = millis();
-  if (now - lastRenderMs < RENDER_INTERVAL_MS) {
-    return;
-  }
   const bool headingMoved = headingFilter.tick(now);
-  if (!navDirty && !headingMoved) {
-    return;
+  const float heading = headingFilter.known() ? headingFilter.display() : 0.0f;
+  const bool moved = motion.tick(now, heading);
+  // Classic style only: zoom in toward the next turn and back out after it.
+  const bool zoomWanted = lastNav.style == STYLE_CLASSIC && lastNav.headingUpMode && !lastNav.gpsWeak &&
+                          !lastNav.offRoute && !lastNav.rerouting;
+  if (lastNav.style != STYLE_CLASSIC) {
+    zoom.reset();
+  }
+  zoom.setTarget(zoomWanted, lastNav.maneuver, lastNav.distanceM - motion.advancedMeters(), lastNav.speedMps,
+                 lastNav.pxPerM, lastNav.zoomMax, lastNav.zoomLeadS);
+  const bool zoomed = zoom.tick(now);
+  if (!navDirty && !headingMoved && !moved && !zoomed) {
+    return false;
   }
   navDirty = false;
-  lastRenderMs = now;
 
   MapView view;
   view.headingKnown = headingFilter.known();
-  view.headingDeg = headingFilter.display();
+  view.headingDeg = heading;
+  view.offsetX = motion.offsetX();
+  view.offsetY = motion.offsetY();
+  view.zoom = zoom.zoom();
   mapRenderer.draw(lastNav, view);
   headingFilter.markDrawn();
 
@@ -422,14 +507,16 @@ void renderTick() {
   rendersPerSecond++;
   renderUsSum += us;
   if (us > renderUsMax) renderUsMax = us;
+  return true;
 }
 
 void updateStatsCounter() {
   const uint32_t now = millis();
   if (now - lastStatsMillis >= 1000) {
-    if (clientConnected && navUpdatesReceived > 0) {
-      Serial.printf("Nav updates/s: %u  Total: %lu  Renders/s: %u  draw avg/max: %lu/%lu us  heap: %u (min %u)  sprite: %s\n",
+    if ((clientConnected || benchActive) && navUpdatesReceived > 0) {
+      Serial.printf("Nav updates/s: %u (+%u motion)  Total: %lu  Renders/s: %u  draw avg/max: %lu/%lu us  heap: %u (min %u)  sprite: %s\n",
                     updatesPerSecond,
+                    motionUpdatesPerSecond,
                     static_cast<unsigned long>(navUpdatesReceived),
                     rendersPerSecond,
                     static_cast<unsigned long>(rendersPerSecond ? renderUsSum / rendersPerSecond : 0),
@@ -439,9 +526,254 @@ void updateStatsCounter() {
                     mapRenderer.usesSprite() ? "yes" : "no");
     }
     updatesPerSecond = 0;
+    motionUpdatesPerSecond = 0;
     rendersPerSecond = 0;
     renderUsSum = 0;
     renderUsMax = 0;
     lastStatsMillis = now;
   }
+}
+
+// Demo ride: no phone needed. Start it with "b" over serial or by tapping the logo on the home
+// screen; tap the map (or send "b") to stop. "m" switches the map style. It rides a route with
+// right, left and right turns on a street grid, slowing for each turn, and ends on the arrival
+// screen before starting over. Frames per second are printed once a second.
+static bool benchMinimal = false;
+static float simDistance = 0.0f;  // metres ridden along the demo route
+static float simSpeed = 6.0f;
+static uint32_t simLastStepMs = 0;
+static uint32_t simLastFrameMs = 0;
+static uint32_t simArrivedAtMs = 0;
+static uint32_t simLastMotionMs = 0;
+static double simFixLat = 0.0;
+static double simFixLon = 0.0;
+
+static void toggleBench() {
+  benchActive = !benchActive;
+  navUpdatesReceived = 0;
+  hasNav = false;
+  showingArrived = false;
+  simDistance = 0.0f;
+  simSpeed = 6.0f;
+  simLastStepMs = 0;
+  simLastFrameMs = 0;
+  simArrivedAtMs = 0;
+  simLastMotionMs = 0;
+  Serial.println(benchActive ? F("bench: on") : F("bench: off"));
+  if (!benchActive) {
+    showWaitingForAppScreen();
+    showingWaiting = true;
+  }
+}
+
+void handleSerialCommands() {
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c == 'm') {
+      benchMinimal = !benchMinimal;
+      Serial.println(benchMinimal ? F("bench style: minimal") : F("bench style: classic"));
+    } else if (c == 'b') {
+      toggleBench();
+    }
+  }
+}
+
+namespace {
+
+struct SimPoint {
+  float x, y;  // metres east / north
+};
+
+// Corners and the end of the route; legs 0-3 follow the street grid (blocks of 120 m).
+const SimPoint SIM_ROUTE[] = {{0, -240}, {0, 360}, {480, 360}, {480, 840}, {840, 840}};
+const uint8_t SIM_MANEUVER[] = {MAN_DEPART, MAN_RIGHT, MAN_LEFT, MAN_RIGHT, MAN_ARRIVE};
+const char* const SIM_INSTRUCTION[] = {"Start route", "Turn right", "Turn left", "Turn right", "Destination ahead"};
+const char* const SIM_STREET[] = {"Maple Street", "Oak Avenue", "Cedar Road", "Harbour Drive"};
+const int SIM_POINTS = 5;
+const double SIM_GRID_M = 120.0;
+const float SIM_PX_PER_M = 0.29f;  // the default 400 m map radius
+const double METERS_PER_DEG = 111320.0;
+
+float simLegLength(int leg) {
+  return hypotf(SIM_ROUTE[leg + 1].x - SIM_ROUTE[leg].x, SIM_ROUTE[leg + 1].y - SIM_ROUTE[leg].y);
+}
+
+float simLegBearing(int leg) {
+  float b = atan2f(SIM_ROUTE[leg + 1].x - SIM_ROUTE[leg].x, SIM_ROUTE[leg + 1].y - SIM_ROUTE[leg].y) / DEG_TO_RAD;
+  return b < 0.0f ? b + 360.0f : b;
+}
+
+float simDistanceTo(int corner) {
+  float d = 0.0f;
+  for (int i = 0; i < corner; i++) d += simLegLength(i);
+  return d;
+}
+
+// Leg the distance s falls on, and the point and heading there. Headings swing smoothly
+// through each corner over 36 m, like a real bike turning.
+void simLocate(float s, int& leg, float& px, float& py, float& heading) {
+  leg = 0;
+  float start = 0.0f;
+  while (leg < SIM_POINTS - 2 && s > start + simLegLength(leg)) {
+    start += simLegLength(leg);
+    leg++;
+  }
+  const float along = s - start;
+  const float length = simLegLength(leg);
+  px = SIM_ROUTE[leg].x + (SIM_ROUTE[leg + 1].x - SIM_ROUTE[leg].x) * along / length;
+  py = SIM_ROUTE[leg].y + (SIM_ROUTE[leg + 1].y - SIM_ROUTE[leg].y) * along / length;
+  heading = simLegBearing(leg);
+  for (int corner = 1; corner < SIM_POINTS - 1; corner++) {
+    const float t = (s - (simDistanceTo(corner) - 18.0f)) / 36.0f;
+    if (t > 0.0f && t < 1.0f) {
+      const float before = simLegBearing(corner - 1);
+      const float after = simLegBearing(corner);
+      float delta = fmodf(after - before + 540.0f, 360.0f) - 180.0f;
+      heading = fmodf(before + delta * (t * t * (3.0f - 2.0f * t)) + 360.0f, 360.0f);
+    }
+  }
+}
+
+void simAddRoutePoint(NavState& s, float wx, float wy, float userX, float userY) {
+  if (s.routeCount >= NAV_MAX_ROUTE_POINTS) return;
+  s.routeX[s.routeCount] = static_cast<int16_t>(204 + (wx - userX) * SIM_PX_PER_M);
+  s.routeY[s.routeCount] = static_cast<int16_t>(204 - (wy - userY) * SIM_PX_PER_M);
+  s.routeCount++;
+}
+
+}  // namespace
+
+void benchTick() {
+  if (!benchActive) {
+    return;
+  }
+  float& distance = simDistance;
+  float& speed = simSpeed;
+  uint32_t& lastStepMs = simLastStepMs;
+  uint32_t& lastFrameMs = simLastFrameMs;
+  uint32_t& arrivedAtMs = simArrivedAtMs;
+
+  const uint32_t now = millis();
+  if (arrivedAtMs != 0) {
+    if (now - arrivedAtMs > 5000) {  // ride again
+      arrivedAtMs = 0;
+      distance = 0.0f;
+      speed = 6.0f;
+      hasNav = false;
+      showingArrived = false;
+      lastStepMs = 0;
+    }
+    return;
+  }
+
+  const float total = simDistanceTo(SIM_POINTS - 1);
+  int nextCorner = 1;
+  while (nextCorner < SIM_POINTS - 1 && simDistanceTo(nextCorner) <= distance) nextCorner++;
+  const float toNext = simDistanceTo(nextCorner) - distance;
+
+  const float dt = lastStepMs == 0 ? 0.0f : (now - lastStepMs) * 0.001f;
+  lastStepMs = now;
+  const float target = fminf(13.0f, 4.5f + toNext * 0.12f);  // slows down for each turn
+  speed += (target - speed) * fminf(1.0f, dt * 1.2f);
+  distance += speed * dt;
+
+  if (total - distance < 12.0f) {
+    arrivedAtMs = now;
+    hasNav = false;
+    awaitingFirstNav = false;
+    showingArrived = true;
+    motion.reset();
+    showArrivalScreen();
+    return;
+  }
+  if (hasNav && now - lastFrameMs < 1000) {
+    // Between the GPS-rate full frames the phone sends a motion update every 100 ms: the newest
+    // (gyro-fused) heading and the last fix with its age.
+    if (now - simLastMotionMs >= 100) {
+      simLastMotionMs = now;
+      int motionLeg;
+      float mx, my, motionHeading;
+      simLocate(distance, motionLeg, mx, my, motionHeading);
+      MotionUpdate update;
+      update.lat = simFixLat;
+      update.lon = simFixLon;
+      update.bearing = motionHeading;
+      update.speedMps = speed;
+      update.bearingValid = true;
+      update.ageMs = static_cast<uint16_t>(now - lastFrameMs);
+      applyMotionUpdate(update);
+    }
+    return;
+  }
+  lastFrameMs = now;
+
+  int leg;
+  float wx, wy, heading;
+  simLocate(distance, leg, wx, wy, heading);
+
+  NavState s;
+  s.valid = true;
+  s.style = benchMinimal ? STYLE_MINIMAL : STYLE_CLASSIC;
+  s.headingUpMode = true;
+  s.bearingValid = true;
+  s.bearing = heading;
+  s.speedMps = speed;
+  s.pxPerM = SIM_PX_PER_M;
+  s.lat = wy / METERS_PER_DEG;
+  s.lon = wx / METERS_PER_DEG;
+  simFixLat = s.lat;
+  simFixLon = s.lon;
+  s.userX = 204;
+  s.userY = 204;
+  s.hasUserPosition = true;
+
+  s.distanceM = static_cast<int>(toNext);
+  s.maneuver = SIM_MANEUVER[nextCorner];
+  strncpy(s.instruction, SIM_INSTRUCTION[nextCorner], sizeof(s.instruction) - 1);
+  strncpy(s.street, SIM_STREET[nextCorner < 3 ? nextCorner : 3], sizeof(s.street) - 1);
+  s.remainingM = static_cast<int>(total - distance);
+  s.remainingS = static_cast<int>(s.remainingM / 9.0f);
+  const int eta = 18 * 60 + 20 + s.remainingS / 60;
+  snprintf(s.eta, sizeof(s.eta), "%02d:%02d", eta / 60 % 24, eta % 60);
+  s.tripProgress = distance / total;
+
+  // City blocks centred on the user like the phone does; the route runs along them.
+  const float half = 204.0f / SIM_PX_PER_M;
+  for (double gx = floor((wx - half) / SIM_GRID_M) * SIM_GRID_M; gx < wx + half; gx += SIM_GRID_M) {
+    if (s.streetSegmentCount >= NAV_MAX_STREET_SEGMENTS) break;
+    const int x = static_cast<int>(204 + (gx - wx) * SIM_PX_PER_M);
+    const int i = s.streetSegmentCount++;
+    s.streetX0[i] = x; s.streetY0[i] = 4; s.streetX1[i] = x; s.streetY1[i] = 404;
+  }
+  for (double gy = floor((wy - half) / SIM_GRID_M) * SIM_GRID_M; gy < wy + half; gy += SIM_GRID_M) {
+    if (s.streetSegmentCount >= NAV_MAX_STREET_SEGMENTS) break;
+    const int y = static_cast<int>(204 - (gy - wy) * SIM_PX_PER_M);
+    const int i = s.streetSegmentCount++;
+    s.streetX0[i] = 4; s.streetY0[i] = y; s.streetX1[i] = 404; s.streetY1[i] = y;
+  }
+
+  simAddRoutePoint(s, wx, wy, wx, wy);
+  for (int corner = nextCorner; corner < SIM_POINTS; corner++) {
+    simAddRoutePoint(s, SIM_ROUTE[corner].x, SIM_ROUTE[corner].y, wx, wy);
+  }
+  // Travelled part: the start and the corners already passed, ending at the user.
+  for (int corner = 0; corner < nextCorner && s.routeDoneCount < NAV_MAX_DONE_POINTS - 1; corner++) {
+    s.routeDoneX[s.routeDoneCount] = static_cast<int16_t>(204 + (SIM_ROUTE[corner].x - wx) * SIM_PX_PER_M);
+    s.routeDoneY[s.routeDoneCount] = static_cast<int16_t>(204 - (SIM_ROUTE[corner].y - wy) * SIM_PX_PER_M);
+    s.routeDoneCount++;
+  }
+  s.routeDoneX[s.routeDoneCount] = 204;
+  s.routeDoneY[s.routeDoneCount] = 204;
+  s.routeDoneCount++;
+
+  const int destX = static_cast<int>(204 + (SIM_ROUTE[SIM_POINTS - 1].x - wx) * SIM_PX_PER_M);
+  const int destY = static_cast<int>(204 - (SIM_ROUTE[SIM_POINTS - 1].y - wy) * SIM_PX_PER_M);
+  if (destX >= 0 && destX < 408 && destY >= 0 && destY < 408) {
+    s.hasDest = true;
+    s.destX = static_cast<int16_t>(destX);
+    s.destY = static_cast<int16_t>(destY);
+  }
+  applyNavFrame(s);
+  Serial.printf("demo: %4.0f m  heading %3.0f  %4.1f m/s  next %s in %d m  zoom %.2f\n", distance, heading, speed,
+                SIM_INSTRUCTION[nextCorner], s.distanceM, zoom.zoom());
 }

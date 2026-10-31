@@ -48,6 +48,32 @@ bool isArrivedJson(const char* json, size_t length) {
          strstr(json, "\"type\": \"arrived\"") != nullptr;
 }
 
+bool isMotionJson(const char* json, size_t length) {
+  if (json == nullptr || length < 10) {
+    return false;
+  }
+  return strstr(json, "\"type\":\"motion\"") != nullptr ||
+         strstr(json, "\"type\": \"motion\"") != nullptr;
+}
+
+bool parseMotionJson(const char* json, size_t length, MotionUpdate& update) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json, length)) {
+    return false;
+  }
+  if (!doc["lat"].is<double>() || !doc["lon"].is<double>()) {
+    return false;
+  }
+  update.lat = doc["lat"].as<double>();
+  update.lon = doc["lon"].as<double>();
+  update.bearing = doc["bearing"] | 0.0f;
+  update.speedMps = doc["speed_mps"] | 0.0f;
+  update.bearingValid = doc["bearing_valid"] | false;
+  update.gpsWeak = doc["gps_weak"] | false;
+  update.ageMs = static_cast<uint16_t>(doc["age_ms"] | 0);
+  return true;
+}
+
 bool parseNavJson(const char* json, size_t length, NavState& state) {
   if (json == nullptr || length == 0) {
     return false;
@@ -76,6 +102,12 @@ bool parseNavJson(const char* json, size_t length, NavState& state) {
   state.lon = doc["lon"] | 0.0;
   state.bearing = doc["bearing"] | 0.0f;
   state.speedMps = doc["speed_mps"] | 0.0f;
+  state.pxPerM = doc["px_per_m"] | 0.0f;
+  state.style = strcmp(doc["style"] | "", "minimal") == 0 ? STYLE_MINIMAL : STYLE_CLASSIC;
+  state.tripProgress = doc["progress"] | -1.0f;
+  state.zoomMax = doc["zoom_max"] | 3.5f;
+  state.zoomLeadS = doc["zoom_lead_s"] | 8.0f;
+  state.ageMs = static_cast<uint16_t>(doc["age_ms"] | 0);
   state.headingUpMode = doc["bearing_valid"].is<bool>();
   state.bearingValid = doc["bearing_valid"] | false;
   state.distanceM = doc["distance_m"] | 0;

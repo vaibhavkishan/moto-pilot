@@ -24,5 +24,8 @@ void drawLoadingBar(TFT_eSPI& tft, bool dark, uint32_t nowMs, bool force);
 /** Screen shown when the destination is reached. */
 void drawArrivalScreen(TFT_eSPI& tft, bool dark);
 
+/** Arrival screen in the Minimal style: black or white, the destination ring and a full progress bar. */
+void drawArrivalScreenMinimal(TFT_eSPI& tft, bool dark);
+
 /** Red map pin with its tip on (x, y); scale 1 is about 21 px tall. Also used on the map. */
 void drawPin(TFT_eSPI& tft, int x, int y, float scale, uint16_t fill, uint16_t edge);

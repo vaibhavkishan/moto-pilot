@@ -48,12 +48,26 @@ inline NavManeuver maneuverFromName(const char* name) {
   return MAN_NONE;
 }
 
+enum NavStyle : uint8_t {
+  STYLE_CLASSIC = 0,
+  STYLE_MINIMAL = 1
+};
+
 struct NavState {
   bool valid = false;
+  uint8_t style = STYLE_CLASSIC;
+  /* Share of the route already travelled, 0..1; negative when the app does not know. */
+  float tripProgress = -1.0f;
+  /* Classic style zoom near turns: the largest zoom (1 = off) and how many seconds before a turn it starts. */
+  float zoomMax = 3.5f;
+  float zoomLeadS = 8.0f;
   double lat = 0.0;
   double lon = 0.0;
   float bearing = 0.0f;
   float speedMps = 0.0f;
+  /* Canvas pixels per metre and age of the fix when sent; both 0 when the app does not send them. */
+  float pxPerM = 0.0f;
+  uint16_t ageMs = 0;
   /* True only when the app sent bearing_valid (heading-up protocol); false when the field is absent. */
   bool headingUpMode = false;
   bool bearingValid = false;
