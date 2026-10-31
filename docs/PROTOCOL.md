@@ -185,7 +185,7 @@ Geometry is sent in a **408 × 408 canvas** centred on the user at `(204, 204)`,
 
 - a black screen with white drawing in the dark theme, and the reverse in the light theme
 - the route ahead as one thick line with a clear halo, other roads only as short, fading stubs (about 30 px) where a side road meets the route, never as a full map, a ring at the destination, and a large arrow for you
-- in the bottom panel: the next-turn icon, the distance to the turn in large digits (`300 m`, `1.8 km`), a small theme button, and a trip progress bar
+- in the bottom panel: the next-turn icon, the distance to the turn in large digits (`300 m`, `1.8 km`), a small theme button, and a trip progress bar. The icon is a straight arrow while the next turn is more than 400 m away and changes to the turn arrow (left, right, slight, sharp, U-turn, roundabout) from 400 m on
 
 The progress bar uses `progress` (0..1, the share of the route already travelled) and is hidden when the field is absent. Street name, remaining time and ETA are not shown in this style.
 
@@ -193,13 +193,13 @@ The progress bar uses `progress` (0..1, the share of the route already travelled
 
 GPS frames arrive at 1–5 Hz, but the CYD redraws as fast as the panel allows while moving. Between frames it advances the map along the heading by `speed_mps × time × px_per_m` (starting from the fix `age_ms`) and keeps turning at the estimated turn rate. When a frame arrives, the canvas is re-centred on the real fix and the small difference from the predicted position fades out over about 0.35 s, so the map never jumps. Prediction stops when `bearing_valid` is `false`, the speed is below 0.5 m/s, GPS is weak, or no frame has arrived for 2 s. A gap larger than 60 px (a reroute, a new trip) snaps instead of gliding.
 
-**Demo ride (no phone needed):** hold the logo on the CYD home screen for one second, or send `b` over its serial port (115200 baud). The CYD then rides a built-in route on a street grid with a right, a left and a right turn, slowing for each one, and ends on the arrival screen before starting over. Tap the map or send `b` again to stop; `m` switches the map style. The ride sends a full frame once a second (like a phone with 1 Hz GPS) plus a motion update every 100 ms. A connecting phone also stops it. Frames per second and the ride position are printed to the serial port.
+**Demo ride (no phone needed):** hold the logo on the CYD home screen for one second, or send `b` over its serial port (115200 baud). The CYD then rides a built-in route on a street grid with a right, a left and a right turn, slowing for each one, and ends on the arrival screen before starting over. Tap the map or send `b` again to stop; `m` switches the map style. Send `r` for a second demo: 500 m that enter a five-exit roundabout and take the 4th exit (map radius 150 m). The ride sends a full frame once a second (like a phone with 1 Hz GPS) plus a motion update every 100 ms. A connecting phone also stops it. Frames per second and the ride position are printed to the serial port.
 
 ### Zoom near turns (CYD, classic style only)
 
 As a turn gets close the CYD zooms the map in around you, and eases back out after the turn, like Google Maps. It uses `distance_m` (reduced by the distance predicted since the frame), `maneuver`, `speed_mps`, `px_per_m`, and the optional `zoom_max` and `zoom_lead_s` (Settings > Zoom near turns):
 
-- Only real turns, roundabouts and the arrival zoom; `straight` and `depart` do not.
+- Only real turns, roundabouts and the arrival zoom; `straight` and `depart` do not. A roundabout zooms in from up to 250 m before the entry and stays zoomed until its exit.
 - The zoom starts `zoom_lead_s` seconds before the turn (speed × lead, at least 80 m, at most 450 m) and reaches its maximum 40 m before it. The maximum is `zoom_max`, limited so the map still shows about 93 m across its height. It never zooms below the phone's scale. `zoom_max` of 1 switches it off.
 - The zoom follows its target with easing and a rate limit, so it never jumps. After the turn the next maneuver is far away, so it eases back to the normal scale in about two seconds.
 - No zoom while off route, rerouting or with weak GPS, and none in the Minimal style.
