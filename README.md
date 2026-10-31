@@ -60,22 +60,22 @@ The firmware draws a **Google Maps–inspired** vector map locally (theme is **n
 
 The home and loading screens show a landscape scene with the MotoPilot logo. The loading screen has an indeterminate progress bar.
 
-**Display style:** in the app, **Settings > Display style** switches between the classic map above and a **Minimal style**: a black (or white) screen with your route as one bold line, short fading stubs where side roads meet it (no full street map), the next-turn icon, a large distance and a trip progress bar. The style changes immediately, also during navigation. The theme button still switches between dark and light. Example screens are in `docs/screens`.
+**Display style:** in the app, **Settings > Display style** switches between the classic map above and a **Minimal style**: a black (or white) screen with your route as one bold line, short fading stubs where side roads meet it (no full street map), the next-turn icon, a large distance and a trip progress bar. The icon is a straight arrow while the next turn is more than 400 m away and becomes the turn arrow (left, right, slight, sharp, U-turn, roundabout) from 400 m on. The style changes immediately, also during navigation. The theme button still switches between dark and light. Example screens are in `docs/screens`.
 
 **Arrival:** when you arrive, the CYD shows a "You have arrived" screen that matches the style: a red pin on the landscape scene in the classic style, and in the Minimal style a black or white screen with a large destination ring and a full progress bar.
 
 **Smooth motion:** the CYD redraws at about 25 frames per second (about 30 in the Minimal style) between GPS frames. It predicts the position from speed and heading, and turns the map with an alpha-beta filtered heading, so the map neither jumps nor lags noticeably.
 
-**Zoom near turns (classic style):** the map zooms in as a turn gets close and eases back out afterwards. In the app, **Settings > Zoom near turns** has a switch, a strength slider (1.5–5×) and a slider for how many seconds before the turn it starts.
+**Zoom near turns (classic style):** the map zooms in as a turn gets close and eases back out afterwards. In the app, **Settings > Zoom near turns** has a switch, a strength slider (1.5–5×) and a slider for how many seconds before the turn it starts. A roundabout stays zoomed in from shortly before the entry until its exit.
 
-**Demo ride (no phone needed):** hold the logo on the CYD home screen for one second, or send `b` over its serial port (115200 baud). The CYD rides a built-in route of about 1.9 km with three turns and ends on the arrival screen. `m` switches between the classic and Minimal style while it runs; tap the map or send `b` again to stop. A connecting phone also stops it. Frame statistics are printed on the serial port.
+**Demo ride (no phone needed):** hold the logo on the CYD home screen for one second, or send `b` over its serial port (115200 baud). The CYD rides a built-in route of about 1.9 km with three turns and ends on the arrival screen. `m` switches between the classic and Minimal style while it runs; tap the map or send `b` again to stop. Send `r` instead of `b` for a 500 m roundabout ride (five exits, the 4th exit is taken). A connecting phone also stops it. Frame statistics are printed on the serial port.
 
 Tap the round **sun / moon button** (bottom-right of the home screen, or right side of the navigation bottom sheet) to toggle the theme. The preference is stored in NVS (`Preferences` namespace `ui` / key `theme`) and survives reboot.
 
 ### Update loop (1–5 Hz, configurable)
 
 1. Open the **Connect** tab, scan, and connect to the CYD (`MotoPilot-CYD`).
-2. In the **Navigate** tab, **search** a destination by address/place name (Nominatim) or enter coordinates.
+2. In the **Navigate** tab, **search** a destination by address/place name (Nominatim) or enter coordinates. A coordinate pair typed into the search box (for example `-23.5505, -46.6333` or `23.55 S, 46.63 W`) is recognised and used directly instead of being searched as a place.
 3. Choose a **route profile**: car, motorcycle, bike, or walking.
 4. Tap **Start navigation** — a foreground `location` service starts.
 5. On each GPS update, the app:
