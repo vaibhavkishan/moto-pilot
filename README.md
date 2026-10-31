@@ -60,6 +60,8 @@ The firmware draws a **Google Maps–inspired** vector map locally (theme is **n
 
 The home and loading screens show a landscape scene with the MotoPilot logo. The loading screen has an indeterminate progress bar.
 
+**Display style:** in the app, **Settings > Display style** switches between the classic map above and a **Minimal style**: a black (or white) screen with your route as one bold line, short fading stubs where side roads meet it, the next-turn icon, a large distance and a trip progress bar. The style changes immediately, also during navigation. Example screens are in `docs/screens`.
+
 Tap the round **sun / moon button** (bottom-right of the home screen, or right side of the navigation bottom sheet) to toggle the theme. The preference is stored in NVS (`Preferences` namespace `ui` / key `theme`) and survives reboot.
 
 ### Update loop (1–5 Hz, configurable)
@@ -74,7 +76,7 @@ Tap the round **sun / moon button** (bottom-right of the home screen, or right s
    - Loads street geometry (Overpass, persisted along the whole corridor)
    - Projects route, streets, and position **without stretching axes**
    - Sends a JSON `nav` message over **BLE** (only the latest frame is kept)
-6. The CYD parses JSON and redraws the map (street casing, route, position arrow, maneuver icon, remaining time/distance, ETA).
+6. The CYD parses JSON and redraws the map (street casing, route, position arrow, maneuver icon, remaining time/distance, ETA). Between GPS frames it keeps moving and turning the map at about 25 frames per second, so motion looks smooth; the phone also sends a small motion update every 100 ms with a gyroscope-fused heading, so turns are followed without the usual GPS lag. In the classic style the map also zooms in as a turn gets close and eases back out after it (**Settings > Zoom near turns**: on/off, strength and how early it starts).
 
 Optional: **Open Maps in browser** mode keeps a WebView open, extracts navigation text as a small HTML snippet, and includes it in each JSON message. The map polyline still comes from GPS + OSRM on the phone.
 
@@ -186,7 +188,7 @@ MotoPilot/
 - **Phone:** Android 7+ with BLE, GPS, and internet (for OSRM / OSM APIs)
 - **Link:** Bluetooth Low Energy between phone and CYD (no shared Wi‑Fi required for the display)
 
-**TFT_eSPI setup:** Configure `Arduino/libraries/TFT_eSPI/Setup_User.h` for your CYD (ILI9341_2, `TFT_RGB`, `USE_HSPI_PORT`). Some CYD panels show inverted colours and swapped red/blue (a pale screen in dark theme, orange and blue exchanged): add `#define TFT_INVERSION_ON` and use `TFT_RGB_ORDER TFT_BGR`.
+**TFT_eSPI setup:** Configure `Arduino/libraries/TFT_eSPI/Setup_User.h` for your CYD (ILI9341_2, `TFT_RGB`, `USE_HSPI_PORT`). Some CYD panels show inverted colours and swapped red/blue (a pale screen in dark theme, orange and blue exchanged): add `#define TFT_INVERSION_ON` and use `TFT_RGB_ORDER TFT_BGR`. Keep the default `LOAD_FONT2`, `LOAD_FONT4` and `LOAD_FONT6` enabled; the large distance in the Minimal style uses font 6.
 
 ---
 
@@ -213,7 +215,7 @@ MotoPilot/
 4. **Search** a destination or enter coordinates under Advanced options.
 5. Tap **Start navigation** and mount the CYD on your handlebar.
 6. Wait until the app shows **Route ready for offline use** if you want streets without internet.
-7. Adjust **Settings** if needed (update rate, map radius).
+7. Adjust **Settings** if needed (update rate, map radius, display style).
 
 If the CYD reboots when connecting, make sure you have the current firmware: TFT updates must run in `loop()`, not in BLE callbacks.
 
@@ -221,13 +223,14 @@ If the CYD reboots when connecting, make sure you have the current firmware: TFT
 
 ## Settings reference
 
-| Setting     | Default | Description                                                        |
-| ----------- | ------- | ------------------------------------------------------------------ |
-| BLE device  | —       | Saved CYD address / name after scan                                |
-| Route type  | Car     | FOSSGIS OSRM: car / bike / foot graphs (motorcycle still uses car) |
-| Update rate | 2 Hz    | Navigation JSON updates per second                                 |
-| Map radius  | 400 m   | Vertical range from the center (equal m/pixel on both axes)        |
-| Destination | —       | Saved query, label, and coordinates                                |
+| Setting         | Default       | Description                                                                                                |
+| --------------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
+| BLE device      | —             | Saved CYD address / name after scan                                                                        |
+| Route type      | Car           | FOSSGIS OSRM: car / bike / foot graphs (motorcycle still uses car)                                         |
+| Update rate     | 2 Hz          | Full navigation frames per second (a light motion update is sent 10 times per second in addition)          |
+| Zoom near turns | On, 3.5×, 8 s | Classic style: zoom in before turns, zoom strength (1.5–5×) and how many seconds before the turn it starts |
+| Map radius      | 400 m         | Vertical range from the center (equal m/pixel on both axes)                                                |
+| Destination     | —             | Saved query, label, and coordinates                                                                        |
 
 ---
 
