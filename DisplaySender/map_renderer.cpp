@@ -19,6 +19,8 @@ static const uint8_t ROUTE_FILL_W = 3;
 static const uint8_t MINIMAL_STREET_W = 2;
 static const float MINIMAL_STUB_LEN = 30.0f;
 static const float MINIMAL_STUB_TOUCH = 8.0f;
+/* Minimal style: a turn arrow is shown from this distance on. */
+static const int MINIMAL_TURN_ICON_M = 400;
 static const uint8_t MINIMAL_ROUTE_EDGE_W = 14;
 static const uint8_t MINIMAL_ROUTE_FILL_W = 9;
 
@@ -746,7 +748,12 @@ void MapRenderer::drawOverlayMinimal(const NavState& state) {
   }
 
   const bool lost = state.rerouting || state.offRoute;
-  const uint8_t maneuver = (state.gpsWeak || lost) ? MAN_NONE : state.maneuver;
+  uint8_t maneuver = (state.gpsWeak || lost) ? MAN_NONE : state.maneuver;
+  /* Far from a turn the arrow says "keep straight"; the turn arrow appears when it is near. */
+  if (maneuver != MAN_NONE && maneuver != MAN_DEPART && maneuver != MAN_ARRIVE && maneuver != MAN_STRAIGHT &&
+      state.distanceM > MINIMAL_TURN_ICON_M) {
+    maneuver = MAN_STRAIGHT;
+  }
   if (!iconValid_ || iconShown_ != maneuver) {
     drawManeuverIcon(maneuver, fg, bg);
   }

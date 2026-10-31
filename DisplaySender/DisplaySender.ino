@@ -106,7 +106,7 @@ static void showArrivalScreen() {
 }
 void handleSerialCommands();
 void benchTick();
-static void toggleBench();
+static void toggleBench(bool roundabout = false);
 void redrawAfterThemeChange();
 
 static bool rxQueuePush(uint8_t b) {
@@ -539,6 +539,7 @@ void updateStatsCounter() {
 // right, left and right turns on a street grid, slowing for each turn, and ends on the arrival
 // screen before starting over. Frames per second are printed once a second.
 static bool benchMinimal = false;
+static bool simRoundabout = false;  // the roundabout ride instead of the city ride
 static float simDistance = 0.0f;  // metres ridden along the demo route
 static float simSpeed = 6.0f;
 static uint32_t simLastStepMs = 0;
@@ -548,7 +549,10 @@ static uint32_t simLastMotionMs = 0;
 static double simFixLat = 0.0;
 static double simFixLon = 0.0;
 
-static void toggleBench() {
+static void toggleBench(bool roundabout) {
+  if (!benchActive) {
+    simRoundabout = roundabout;
+  }
   benchActive = !benchActive;
   navUpdatesReceived = 0;
   hasNav = false;
@@ -573,7 +577,12 @@ void handleSerialCommands() {
       benchMinimal = !benchMinimal;
       Serial.println(benchMinimal ? F("bench style: minimal") : F("bench style: classic"));
     } else if (c == 'b') {
-      toggleBench();
+      toggleBench(false);
+    } else if (c == 'r') {
+      if (benchActive) {
+        toggleBench(false);
+      }
+      toggleBench(true);
     }
   }
 }
@@ -641,6 +650,158 @@ void simAddRoutePoint(NavState& s, float wx, float wy, float userX, float userY)
   s.routeCount++;
 }
 
+// Roundabout demo: 500 m that enter a five-exit roundabout from the south and leave by the 4th exit.
+const float RB_PX_PER_M = 0.77f;  // a 150 m map radius, so the roundabout is large enough to read
+const float RB_RADIUS = 30.0f;
+const float RB_TOTAL = 500.0f;
+const float RB_APPROACH = 220.0f;
+const float RB_EXIT_STEP_DEG = 72.0f;  // five exits are spaced 72 degrees apart
+const int RB_TAKE = 4;
+const float RB_ARC = RB_RADIUS * RB_EXIT_STEP_DEG * RB_TAKE * DEG_TO_RAD;
+const float RB_EXIT_BEARING = 180.0f - RB_EXIT_STEP_DEG * RB_TAKE;  // traffic circulates counter-clockwise
+const float RB_WINDOW = 12.0f;
+
+float rbSmooth(float t) {
+  t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+float rbBlend(float from, float to, float t) {
+  const float delta = fmodf(to - from + 1260.0f, 360.0f) - 180.0f;
+  return fmodf(from + delta * t + 720.0f, 360.0f);
+}
+
+// Compass angle, seen from the centre, of the point on the ring that distance s has reached.
+float rbRingAngle(float s) {
+  float along = s - RB_APPROACH;
+  along = along < 0.0f ? 0.0f : (along > RB_ARC ? RB_ARC : along);
+  return 180.0f - along / (RB_RADIUS * DEG_TO_RAD);
+}
+
+void rbLocate(float s, float& x, float& y, float& heading) {
+  const float exitRad = RB_EXIT_BEARING * DEG_TO_RAD;
+  if (s <= RB_APPROACH) {
+    x = 0.0f;
+    y = -RB_RADIUS - (RB_APPROACH - s);
+  } else if (s <= RB_APPROACH + RB_ARC) {
+    const float a = rbRingAngle(s) * DEG_TO_RAD;
+    x = RB_RADIUS * sinf(a);
+    y = RB_RADIUS * cosf(a);
+  } else {
+    const float out = RB_RADIUS + (s - RB_APPROACH - RB_ARC);
+    x = out * sinf(exitRad);
+    y = out * cosf(exitRad);
+  }
+  const float enter = RB_APPROACH;
+  const float leave = RB_APPROACH + RB_ARC;
+  const float ring = rbRingAngle(s) - 90.0f;
+  if (s < enter - RB_WINDOW) {
+    heading = 0.0f;
+  } else if (s < enter + RB_WINDOW) {
+    heading = rbBlend(0.0f, ring, rbSmooth((s - (enter - RB_WINDOW)) / (2.0f * RB_WINDOW)));
+  } else if (s < leave - RB_WINDOW) {
+    heading = fmodf(ring + 720.0f, 360.0f);
+  } else if (s < leave + RB_WINDOW) {
+    heading = rbBlend(ring, RB_EXIT_BEARING, rbSmooth((s - (leave - RB_WINDOW)) / (2.0f * RB_WINDOW)));
+  } else {
+    heading = fmodf(RB_EXIT_BEARING + 720.0f, 360.0f);
+  }
+}
+
+float rbTargetSpeed(float s, float toNext) {
+  if (s < RB_APPROACH) return fminf(10.0f, 4.5f + toNext * 0.12f);
+  if (s < RB_APPROACH + RB_ARC) return 5.0f;
+  return fminf(9.0f, 3.5f + toNext * 0.12f);
+}
+
+// World point to canvas pixels around the user; off-canvas points become the gap marker (-1, -1).
+void rbCanvas(float wx, float wy, float ux, float uy, int16_t& cx, int16_t& cy) {
+  const float px = 204.0f + (wx - ux) * RB_PX_PER_M;
+  const float py = 204.0f - (wy - uy) * RB_PX_PER_M;
+  if (px < 0.0f || px > 407.0f || py < 0.0f || py > 407.0f) {
+    cx = -1;
+    cy = -1;
+  } else {
+    cx = static_cast<int16_t>(lroundf(px));
+    cy = static_cast<int16_t>(lroundf(py));
+  }
+}
+
+void rbAddStreet(NavState& s, float ax, float ay, float bx, float by, float ux, float uy) {
+  if (s.streetSegmentCount >= NAV_MAX_STREET_SEGMENTS) return;
+  int16_t x0, y0, x1, y1;
+  rbCanvas(ax, ay, ux, uy, x0, y0);
+  rbCanvas(bx, by, ux, uy, x1, y1);
+  if (x0 < 0 || x1 < 0) return;
+  const int i = s.streetSegmentCount++;
+  s.streetX0[i] = x0; s.streetY0[i] = y0; s.streetX1[i] = x1; s.streetY1[i] = y1;
+}
+
+void rbFillFrame(NavState& s, float distance, float toNext, float wx, float wy) {
+  const float leave = RB_APPROACH + RB_ARC;
+  s.distanceM = static_cast<int>(toNext);
+  if (distance < RB_APPROACH) {
+    s.maneuver = MAN_ROUNDABOUT;
+    strncpy(s.instruction, "At the roundabout take the 4th exit", sizeof(s.instruction) - 1);
+  } else if (distance < leave) {
+    s.maneuver = MAN_ROUNDABOUT;
+    strncpy(s.instruction, "Take the 4th exit", sizeof(s.instruction) - 1);
+  } else {
+    s.maneuver = MAN_ARRIVE;
+    strncpy(s.instruction, "Destination ahead", sizeof(s.instruction) - 1);
+  }
+  strncpy(s.street, "Rotary Avenue", sizeof(s.street) - 1);
+  s.remainingM = static_cast<int>(RB_TOTAL - distance);
+  s.remainingS = static_cast<int>(s.remainingM / 7.0f);
+  const int eta = 18 * 60 + 20 + s.remainingS / 60;
+  snprintf(s.eta, sizeof(s.eta), "%02d:%02d", eta / 60 % 24, eta % 60);
+  s.tripProgress = distance / RB_TOTAL;
+
+  // The ring and its five arms; the first arm is the road the ride arrives on.
+  for (int a = 0; a < 360; a += 12) {
+    const float r0 = a * DEG_TO_RAD;
+    const float r1 = (a + 12) * DEG_TO_RAD;
+    rbAddStreet(s, RB_RADIUS * sinf(r0), RB_RADIUS * cosf(r0), RB_RADIUS * sinf(r1), RB_RADIUS * cosf(r1), wx, wy);
+  }
+  for (int arm = 0; arm < 5; arm++) {
+    const float bearing = (180.0f - RB_EXIT_STEP_DEG * arm) * DEG_TO_RAD;
+    for (int piece = 0; piece < 12; piece++) {
+      const float d0 = RB_RADIUS + piece * 25.0f;
+      const float d1 = d0 + 25.0f;
+      rbAddStreet(s, d0 * sinf(bearing), d0 * cosf(bearing), d1 * sinf(bearing), d1 * cosf(bearing), wx, wy);
+    }
+  }
+
+  // Route ahead, coarse on the straight parts and finer around the ring.
+  float p = distance;
+  while (s.routeCount < NAV_MAX_ROUTE_POINTS - 1) {
+    float x, y, h;
+    rbLocate(p, x, y, h);
+    rbCanvas(x, y, wx, wy, s.routeX[s.routeCount], s.routeY[s.routeCount]);
+    s.routeCount++;
+    if (p >= RB_TOTAL) break;
+    float next = p + ((p >= RB_APPROACH && p < leave) ? 10.0f : 16.0f);
+    if (p < RB_APPROACH && next > RB_APPROACH) next = RB_APPROACH;
+    if (p < leave && next > leave) next = leave;
+    p = next > RB_TOTAL ? RB_TOTAL : next;
+  }
+  // Travelled part, oldest point first, ending at the user.
+  float back[NAV_MAX_DONE_POINTS];
+  int backCount = 0;
+  for (float q = distance; q >= 0.0f && backCount < NAV_MAX_DONE_POINTS; q -= 10.0f) back[backCount++] = q;
+  for (int i = backCount - 1; i >= 0; i--) {
+    float x, y, h;
+    rbLocate(back[i], x, y, h);
+    rbCanvas(x, y, wx, wy, s.routeDoneX[s.routeDoneCount], s.routeDoneY[s.routeDoneCount]);
+    s.routeDoneCount++;
+  }
+
+  float dx, dy, dh;
+  rbLocate(RB_TOTAL, dx, dy, dh);
+  rbCanvas(dx, dy, wx, wy, s.destX, s.destY);
+  s.hasDest = s.destX >= 0;
+}
+
 }  // namespace
 
 void benchTick() {
@@ -666,14 +827,20 @@ void benchTick() {
     return;
   }
 
-  const float total = simDistanceTo(SIM_POINTS - 1);
+  const float total = simRoundabout ? RB_TOTAL : simDistanceTo(SIM_POINTS - 1);
   int nextCorner = 1;
-  while (nextCorner < SIM_POINTS - 1 && simDistanceTo(nextCorner) <= distance) nextCorner++;
-  const float toNext = simDistanceTo(nextCorner) - distance;
+  float toNext;
+  if (simRoundabout) {
+    const float leaveRing = RB_APPROACH + RB_ARC;
+    toNext = distance < RB_APPROACH ? RB_APPROACH - distance : (distance < leaveRing ? leaveRing - distance : total - distance);
+  } else {
+    while (nextCorner < SIM_POINTS - 1 && simDistanceTo(nextCorner) <= distance) nextCorner++;
+    toNext = simDistanceTo(nextCorner) - distance;
+  }
 
   const float dt = lastStepMs == 0 ? 0.0f : (now - lastStepMs) * 0.001f;
   lastStepMs = now;
-  const float target = fminf(13.0f, 4.5f + toNext * 0.12f);  // slows down for each turn
+  const float target = simRoundabout ? rbTargetSpeed(distance, toNext) : fminf(13.0f, 4.5f + toNext * 0.12f);  // slows down for each turn
   speed += (target - speed) * fminf(1.0f, dt * 1.2f);
   distance += speed * dt;
 
@@ -693,7 +860,11 @@ void benchTick() {
       simLastMotionMs = now;
       int motionLeg;
       float mx, my, motionHeading;
-      simLocate(distance, motionLeg, mx, my, motionHeading);
+      if (simRoundabout) {
+        rbLocate(distance, mx, my, motionHeading);
+      } else {
+        simLocate(distance, motionLeg, mx, my, motionHeading);
+      }
       MotionUpdate update;
       update.lat = simFixLat;
       update.lon = simFixLon;
@@ -709,7 +880,11 @@ void benchTick() {
 
   int leg;
   float wx, wy, heading;
-  simLocate(distance, leg, wx, wy, heading);
+  if (simRoundabout) {
+    rbLocate(distance, wx, wy, heading);
+  } else {
+    simLocate(distance, leg, wx, wy, heading);
+  }
 
   NavState s;
   s.valid = true;
@@ -718,7 +893,7 @@ void benchTick() {
   s.bearingValid = true;
   s.bearing = heading;
   s.speedMps = speed;
-  s.pxPerM = SIM_PX_PER_M;
+  s.pxPerM = simRoundabout ? RB_PX_PER_M : SIM_PX_PER_M;
   s.lat = wy / METERS_PER_DEG;
   s.lon = wx / METERS_PER_DEG;
   simFixLat = s.lat;
@@ -726,6 +901,14 @@ void benchTick() {
   s.userX = 204;
   s.userY = 204;
   s.hasUserPosition = true;
+
+  if (simRoundabout) {
+    rbFillFrame(s, distance, toNext, wx, wy);
+    applyNavFrame(s);
+    Serial.printf("demo: %4.0f m  heading %3.0f  %4.1f m/s  next %s in %d m  zoom %.2f\n", distance, heading, speed,
+                  s.instruction, s.distanceM, zoom.zoom());
+    return;
+  }
 
   s.distanceM = static_cast<int>(toNext);
   s.maneuver = SIM_MANEUVER[nextCorner];

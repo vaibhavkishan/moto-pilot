@@ -9,6 +9,9 @@ static const float MIN_USEFUL_ZOOM = 1.05f;
 static const float NEAR_M = 40.0f;         // at this distance the zoom is at its maximum
 static const float FAR_MIN_M = 80.0f;      // zooming starts at least this far from the turn
 static const float FAR_MAX_M = 450.0f;
+/* A roundabout stays zoomed in from entry to exit, whose step ends up to ~150 m after the entry. */
+static const float ROUNDABOUT_NEAR_M = 150.0f;
+static const float ROUNDABOUT_FAR_M = 250.0f;
 static const float TAU_IN_S = 0.5f;
 static const float TAU_OUT_S = 0.7f;       // easing back out is gentler
 static const float MAX_RATE_PER_S = 1.5f;
@@ -49,7 +52,12 @@ float ZoomController::targetFor(uint8_t maneuver, float distanceM, float speedMp
   float farM = std::isfinite(speedMps) ? speedMps * leadS : FAR_MIN_M;
   if (farM < FAR_MIN_M) farM = FAR_MIN_M;
   if (farM > FAR_MAX_M) farM = FAR_MAX_M;
-  float t = (farM - distanceM) / (farM - NEAR_M);
+  float nearM = NEAR_M;
+  if (maneuver == MAN_ROUNDABOUT) {
+    nearM = ROUNDABOUT_NEAR_M;
+    if (farM < ROUNDABOUT_FAR_M) farM = ROUNDABOUT_FAR_M;
+  }
+  float t = (farM - distanceM) / (farM - nearM);
   if (t < 0.0f) t = 0.0f;
   if (t > 1.0f) t = 1.0f;
   const float eased = t * t * (3.0f - 2.0f * t);

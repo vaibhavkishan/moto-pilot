@@ -322,6 +322,20 @@ static void testPredictionStopsWhenFramesStop() {
 
 static std::unique_ptr<NavState> headingUpFrame();
 
+static void testZoomStaysInAcrossARoundabout() {
+  const float px = 0.77f;
+  const float full = ZoomController::targetFor(MAN_ROUNDABOUT, 20.0f, 5.0f, px, 3.5f, 8.0f);
+  // On the ring the exit can still be well over 100 m away; the zoom must not drop back out.
+  CHECK(ZoomController::targetFor(MAN_ROUNDABOUT, 140.0f, 5.0f, px, 3.5f, 8.0f) > full - 0.01f);
+  CHECK(ZoomController::targetFor(MAN_ROUNDABOUT, 100.0f, 5.0f, px, 3.5f, 8.0f) > full - 0.01f);
+  // Ordinary turns still wait until they are close.
+  CHECK(near_f(ZoomController::targetFor(MAN_RIGHT, 140.0f, 5.0f, px, 3.5f, 8.0f), 1.0f));
+  // The approach starts early but is gradual.
+  const float early = ZoomController::targetFor(MAN_ROUNDABOUT, 230.0f, 10.0f, px, 3.5f, 8.0f);
+  CHECK(early > 1.0f && early < full);
+  CHECK(near_f(ZoomController::targetFor(MAN_ROUNDABOUT, 400.0f, 10.0f, px, 3.5f, 8.0f), 1.0f));
+}
+
 static void testZoomStrengthAndLeadComeFromTheSettings() {
   const float px = 0.29f;
   CHECK(near_f(ZoomController::targetFor(MAN_RIGHT, 20.0f, 12.0f, px, 1.0f, 8.0f), 1.0f));  // switched off
@@ -599,6 +613,7 @@ int main() {
   testOffsetMovesTheGeometryUnderTheAnchor();
   testZoomGrowsAsTheTurnGetsCloser();
   testZoomStrengthAndLeadComeFromTheSettings();
+  testZoomStaysInAcrossARoundabout();
   testZoomOnlyForTurnsAndOnlyWhenTheMapIsFar();
   testZoomStartsEarlierWhenFast();
   testZoomMovesSmoothlyInAndBackOut();
