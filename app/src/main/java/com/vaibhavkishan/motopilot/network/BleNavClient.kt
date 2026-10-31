@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -66,14 +67,24 @@ class BleNavClient(context: Context) {
     private data class OutgoingFrame(
         val connection: BluetoothGatt,
         val characteristic: BluetoothGattCharacteristic,
-        val bytes: ByteArray
+        val bytes: ByteArray,
+        val isMotion: Boolean = false,
+        val queuedAt: Long = SystemClock.elapsedRealtime()
     )
     private val outgoing = Channel<OutgoingFrame>(Channel.CONFLATED)
+    // Light motion updates; a newer one replaces an older one, and full frames are always sent first.
+    private val outgoingMotion = Channel<OutgoingFrame>(Channel.CONFLATED)
     @Volatile private var lastQueuedAt = 0L
 
     init {
         scope.launch {
-            for (frame in outgoing) {
+            while (true) {
+                val frame = select<OutgoingFrame?> {
+                    outgoing.onReceiveCatching { it.getOrNull() }
+                    outgoingMotion.onReceiveCatching { it.getOrNull() }
+                } ?: break
+                // A motion update that waited behind a full frame is out of date; the next one is due.
+                if (frame.isMotion && SystemClock.elapsedRealtime() - frame.queuedAt > MOTION_MAX_AGE_MS) continue
                 writeMutex.withLock {
                     writeInChunks(frame.connection, frame.characteristic, frame.bytes)
                 }
@@ -173,7 +184,12 @@ class BleNavClient(context: Context) {
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
-    fun sendNavMessage(json: String): Boolean {
+    fun sendNavMessage(json: String): Boolean = queueMessage(json, motion = false)
+
+    /** Queues a light motion update; it is dropped if it cannot be sent promptly. */
+    fun sendMotionMessage(json: String): Boolean = queueMessage(json, motion = true)
+
+    private fun queueMessage(json: String, motion: Boolean): Boolean {
         if (_connectionState.value != ConnectionState.CONNECTED) return false
         val characteristic = rxCharacteristic ?: return false
         val gattLocal = gatt ?: return false
@@ -183,12 +199,14 @@ class BleNavClient(context: Context) {
             return false
         }
         lastQueuedAt = SystemClock.elapsedRealtime()
-        return outgoing.trySend(OutgoingFrame(gattLocal, characteristic, payload)).isSuccess
+        val frame = OutgoingFrame(gattLocal, characteristic, payload, isMotion = motion)
+        return (if (motion) outgoingMotion else outgoing).trySend(frame).isSuccess
     }
 
     fun release() {
         disconnect(manual = true)
         outgoing.close()
+        outgoingMotion.close()
         scope.cancel()
     }
 
@@ -383,6 +401,7 @@ class BleNavClient(context: Context) {
         private const val DEVICE_NAME_HINT = "MotoPilot"
         private const val REQUESTED_MTU = 512
         private const val DEFAULT_CHUNK = 180
+        private const val MOTION_MAX_AGE_MS = 250L
         private const val MAX_PAYLOAD_BYTES = 8192
         private const val WRITE_TIMEOUT_MS = 2000L
         private const val TAG = "MotoPilotBLE"

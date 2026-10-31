@@ -66,12 +66,13 @@ object MapProjector {
         val dyMeters = (lat - centerLat) * METERS_PER_DEG_LAT
 
         val halfW = scaleMeters.coerceAtLeast(50.0)
-        // Preserve vertical range and use equal pixel scale on both axes.
-        // The scale is defined by the visible map height, independent of the canvas size.
-        val pixelsPerMeter = MAP_HEIGHT / (2.0 * halfW)
-        return ScreenPoint(CANVAS_CENTER + dxMeters * pixelsPerMeter,
-            CANVAS_CENTER - dyMeters * pixelsPerMeter)
+        // Equal pixel scale on both axes, defined by the visible map height.
+        val scale = pixelsPerMeter(scaleMeters)
+        return ScreenPoint(CANVAS_CENTER + dxMeters * scale, CANVAS_CENTER - dyMeters * scale)
     }
+
+    /** Canvas pixels per metre for a map radius; the CYD uses it to predict movement between frames. */
+    fun pixelsPerMeter(scaleMeters: Double): Double = MAP_HEIGHT / (2.0 * scaleMeters.coerceAtLeast(50.0))
 
     fun simplifyRoute(
         points: List<Pair<Double, Double>>,

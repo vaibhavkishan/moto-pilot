@@ -123,6 +123,21 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
+    <string name="settings_display_section">Display style</string>
+    <string name="style_classic">Classic map</string>
+    <string name="style_classic_desc">Streets, route and a bottom sheet in Google Maps colours.</string>
+    <string name="style_minimal">Minimal style</string>
+    <string name="style_minimal_desc">A minimal screen: your route with short side-road stubs, the next turn, its distance and trip progress.</string>
+    <string name="setting_style_desc">Applies immediately, also while navigating. The light and dark theme is still chosen on the display.</string>
+    <string name="settings_zoom_section">Zoom near turns</string>
+    <string name="setting_zoom_switch_title">Zoom in before turns</string>
+    <string name="setting_zoom_switch_desc">The classic map zooms in as a turn gets close and zooms out afterwards. Applies immediately.</string>
+    <string name="setting_zoom_strength_title">Zoom strength</string>
+    <string name="setting_zoom_strength_value">%1$.1f×</string>
+    <string name="setting_zoom_strength_desc">How much the map is magnified at the turn. Large values are limited so the surroundings stay visible.</string>
+    <string name="setting_zoom_lead_title">Zoom starts</string>
+    <string name="setting_zoom_lead_value">%1$d s before</string>
+    <string name="setting_zoom_lead_desc">How early the zoom starts, in seconds of riding before the turn.</string>
     <string name="settings_navigation_section">Navigation</string>
     <string name="setting_nav_hz_title">Update rate</string>
     <string name="setting_nav_hz_value">%1$d Hz</string>

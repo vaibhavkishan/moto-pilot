@@ -44,8 +44,19 @@ class NavigationEngine(
     private val offlineMap: OfflineMapRepository,
     private val navClient: BleNavClient,
     private val settingsProvider: suspend () -> AppSettings,
-    private val onNavigationEnded: () -> Unit = {}
+    private val onNavigationEnded: () -> Unit = {},
+    private val yawRateSource: YawRateSource? = null
 ) {
+
+    /** The position, speed and heading of the newest full frame, repeated by the motion updates. */
+    private data class FixSnapshot(
+        val lat: Double,
+        val lon: Double,
+        val speedMps: Float,
+        val bearing: Float,
+        val bearingValid: Boolean,
+        val elapsedMs: Long
+    )
 
     private var route: RouteData? = null
     private var progressCalculator: RouteProgressCalculator? = null
@@ -67,6 +78,9 @@ class NavigationEngine(
     private var lastAcceptedMs = 0L
     @Volatile private var lastMessage: NavMessage? = null
     private val statsTracker = StatsTracker()
+    private val headingFusion = HeadingFusion()
+    @Volatile private var lastFix: FixSnapshot? = null
+    private var motionJob: Job? = null
 
     fun startNavigation(destLat: Double, destLon: Double) {
         stopNavigation()
@@ -76,6 +90,15 @@ class NavigationEngine(
         TransmissionHub.setNavigating(true)
         headingGate.reset()
         rerouteGate.reset()
+        headingFusion.reset()
+        lastFix = null
+        yawRateSource?.start { rate, timeMs -> headingFusion.onGyro(rate, timeMs) }
+        motionJob = scope.launch {
+            while (true) {
+                delay(MOTION_INTERVAL_MS)
+                sendMotionFrame()
+            }
+        }
         locationJob = scope.launch {
             try {
                 val settings = settingsProvider()
@@ -143,6 +166,10 @@ class NavigationEngine(
     }
 
     fun stopNavigation() {
+        motionJob?.cancel()
+        motionJob = null
+        yawRateSource?.stop()
+        lastFix = null
         locationJob?.cancel()
         locationJob = null
         downloadJob?.cancel()
@@ -219,6 +246,13 @@ class NavigationEngine(
 
         val step = progress.nextStepIndex?.let { currentRoute.steps.getOrNull(it) }
         val distanceM = progress.distanceToNextStepM ?: 0
+        // Settings are read every frame so a change shows up without restarting navigation.
+        val live = runCatching { settingsProvider() }.getOrDefault(settings)
+        val style = live.mapStyle
+        val zoomMax = if (live.zoomEnabled) live.zoomMax else 1.0
+        val tripFraction = progress.remainingDistanceM?.let { remaining ->
+            currentRoute.distanceM.takeIf { it > 0.0 }?.let { total -> (1.0 - remaining / total).toFloat() }
+        }
         val simplified = MapProjector.simplifyRoute(
             currentRoute.coordinates.map { it.lat to it.lon }
         )
@@ -258,11 +292,17 @@ class NavigationEngine(
             scaleMeters = settings.mapScaleMeters
         ) }
 
-        val bearing = if (update.bearing.isFinite()) {
+        val nowMs = SystemClock.elapsedRealtime()
+        val gpsCourseValid = headingGate.isValid(update.bearing, update.speedMps, update.bearingAccuracyDeg)
+        if (gpsCourseValid) headingFusion.onGps(update.bearing, update.speedMps, nowMs)
+        // While riding, the gyro-fused heading turns the map smoothly; otherwise the GPS course is used.
+        val fusedBearing = if (update.speedMps >= FUSED_MIN_SPEED_MPS) headingFusion.heading(nowMs) else null
+        val bearing = fusedBearing ?: if (update.bearing.isFinite()) {
             update.bearing
         } else {
             computeBearingFromRoute(update, simplified)
         }
+        val bearingValid = fusedBearing != null || gpsCourseValid
 
         val message = NavMessage(
             lat = update.lat,
@@ -274,10 +314,16 @@ class NavigationEngine(
             remainingDurationS = progress.remainingDurationS,
             offRoute = offRoute,
             speedMps = update.speedMps,
-            bearingValid = headingGate.isValid(update.bearing, update.speedMps, update.bearingAccuracyDeg),
+            pxPerM = MapProjector.pixelsPerMeter(settings.mapScaleMeters),
+            ageMs = (SystemClock.elapsedRealtime() - raw.elapsedMs).coerceIn(0L, 5000L).toInt(),
+            bearingValid = bearingValid,
             maneuver = step?.let { ManeuverIcon.fromInstruction(it.instruction) } ?: "",
             eta = EtaFormatter.format(System.currentTimeMillis(), progress.remainingDurationS),
             rerouting = rerouting,
+            style = style.wire,
+            tripProgress = tripFraction,
+            zoomMax = zoomMax,
+            zoomLeadS = live.zoomLeadSeconds,
             street = step?.street ?: "",
             routeScreenPoints = screenRoute,
             routeDonePoints = screenDone,
@@ -296,11 +342,43 @@ class NavigationEngine(
         }
         lastMessage = message
         if (navClient.sendNavMessage(json)) {
+            lastFix = FixSnapshot(
+                lat = message.lat,
+                lon = message.lon,
+                speedMps = message.speedMps,
+                bearing = message.bearing,
+                bearingValid = message.bearingValid,
+                elapsedMs = raw.elapsedMs
+            )
             statsTracker.onNavUpdate(json.toByteArray().size)
             TransmissionHub.updateStats(
                 statsTracker.currentStats(settings.resolutionLabel)
             )
         }
+    }
+
+    /**
+     * Light update between full frames: the newest heading (gyro-fused while riding) with the
+     * last fix and its age. The CYD turns and moves the map with it.
+     */
+    private fun sendMotionFrame() {
+        val fix = lastFix ?: return
+        if (arrived || navClient.connectionState.value != com.vaibhavkishan.motopilot.models.ConnectionState.CONNECTED) return
+        val nowMs = SystemClock.elapsedRealtime()
+        val fixAgeMs = nowMs - fix.elapsedMs
+        if (fixAgeMs > MOTION_MAX_FIX_AGE_MS) return
+        val fused = if (fix.speedMps >= FUSED_MIN_SPEED_MPS) headingFusion.heading(nowMs) else null
+        navClient.sendMotionMessage(
+            NavMessage.motion(
+                lat = fix.lat,
+                lon = fix.lon,
+                bearing = fused ?: fix.bearing,
+                bearingValid = fused != null || fix.bearingValid,
+                speedMps = fix.speedMps,
+                ageMs = fixAgeMs.toInt(),
+                gpsWeak = false
+            )
+        )
     }
 
     private fun handleArrival() {
@@ -390,5 +468,11 @@ class NavigationEngine(
         val x = cos(Math.toRadians(lat1)) * sin(Math.toRadians(lat2)) -
             sin(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * cos(dLon)
         return ((Math.toDegrees(atan2(y, x)) + 360) % 360).toFloat()
+    }
+
+    private companion object {
+        const val MOTION_INTERVAL_MS = 100L
+        const val MOTION_MAX_FIX_AGE_MS = 3000L
+        const val FUSED_MIN_SPEED_MPS = 1.5f
     }
 }

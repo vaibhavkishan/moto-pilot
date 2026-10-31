@@ -26,13 +26,25 @@ data class NavMessage(
     val offRoute: Boolean = false,
     val gpsWeak: Boolean = false,
     val speedMps: Float = 0f,
+    /** Canvas pixels per metre; lets the CYD predict movement between frames. 0 = unknown. */
+    val pxPerM: Double = 0.0,
+    /** How old the GPS fix already was when this frame was sent. */
+    val ageMs: Int = 0,
     /** True only for a real GPS course while moving; the CYD holds its last heading otherwise. */
     val bearingValid: Boolean = false,
     /** Icon code for the next maneuver (see ManeuverIcon); empty when unknown. */
     val maneuver: String = "",
     /** Arrival clock time, HH:mm. */
     val eta: String? = null,
-    val rerouting: Boolean = false
+    val rerouting: Boolean = false,
+    /** Wire name of the display style (see MapStyle); classic is omitted from the JSON. */
+    val style: String = "classic",
+    /** Share of the route already travelled, 0..1; null when unknown. */
+    val tripProgress: Float? = null,
+    /** Strongest zoom near turns (classic style); 1 switches the zoom off. */
+    val zoomMax: Double = 3.5,
+    /** Seconds before a turn at which the zoom starts. */
+    val zoomLeadS: Int = 8
 ) {
     fun toJson(): String {
         val route = JSONArray()
@@ -52,6 +64,7 @@ data class NavMessage(
             .put("gps_weak", gpsWeak)
             .put("speed_mps", Math.round((if (speedMps.isFinite()) speedMps else 0f) * 10) / 10.0)
             .put("bearing_valid", bearingValid)
+            .put("age_ms", ageMs.coerceIn(0, 5000))
             .put("rerouting", rerouting)
             .put("street", java.text.Normalizer.normalize(street, java.text.Normalizer.Form.NFC).take(47))
             .put("route", route)
@@ -79,7 +92,14 @@ data class NavMessage(
             json.put("html", html.take(480))
         }
         if (maneuver.isNotEmpty()) json.put("maneuver", maneuver)
+        if (pxPerM > 0.0) json.put("px_per_m", Math.round(pxPerM * 10000) / 10000.0)
         if (eta != null) json.put("eta", eta)
+        if (style != "classic") json.put("style", style)
+        if (style == "classic") {
+            json.put("zoom_max", Math.round(zoomMax.coerceIn(1.0, 6.0) * 100) / 100.0)
+            json.put("zoom_lead_s", zoomLeadS.coerceIn(1, 30))
+        }
+        tripProgress?.let { json.put("progress", Math.round(it.coerceIn(0f, 1f) * 1000) / 1000.0) }
         return json.toString()
     }
 
@@ -89,5 +109,28 @@ data class NavMessage(
         fun loading(): String = """{"type":"loading"}"""
 
         fun arrived(): String = """{"type":"arrived"}"""
+
+        /**
+         * Light update sent between full frames: the newest fix and heading, no map geometry.
+         * The CYD moves and turns the map with it.
+         */
+        fun motion(
+            lat: Double,
+            lon: Double,
+            bearing: Float,
+            bearingValid: Boolean,
+            speedMps: Float,
+            ageMs: Int,
+            gpsWeak: Boolean
+        ): String = JSONObject()
+            .put("type", "motion")
+            .put("lat", lat)
+            .put("lon", lon)
+            .put("bearing", Math.round(bearing * 10) / 10.0)
+            .put("bearing_valid", bearingValid)
+            .put("speed_mps", Math.round((if (speedMps.isFinite()) speedMps else 0f) * 10) / 10.0)
+            .put("age_ms", ageMs.coerceIn(0, 5000))
+            .put("gps_weak", gpsWeak)
+            .toString()
     }
 }

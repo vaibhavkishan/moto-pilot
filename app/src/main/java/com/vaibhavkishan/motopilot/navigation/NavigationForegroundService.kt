@@ -68,7 +68,8 @@ class NavigationForegroundService : Service() {
             offlineMap = OfflineMapRepository(File(filesDir, "offline-map-v1"), OverpassStreetProvider()),
             navClient = app.navClient,
             settingsProvider = { app.settingsRepository.settings.first() },
-            onNavigationEnded = { stopNavigationService() }
+            onNavigationEnded = { stopNavigationService() },
+            yawRateSource = YawRateSensor(this)
         )
         navigationEngine = engine
         engine.startNavigation(destLat, destLon)
